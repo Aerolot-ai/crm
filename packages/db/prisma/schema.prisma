@@ -313,6 +313,13 @@ model Company {
   enrichmentError  String?
   enrichment       CompanyEnrichment?
 
+  aerolotDealerId         String?
+  aerolotProvisionStatus  String?
+  aerolotProvisionError   String?
+  aerolotPortalUrl        String?
+  aerolotProvisionedAt    DateTime?
+  aerolotProvisionSource  String?
+
   source RecordSource @default(MANUAL)
 
   lastActivityAt DateTime?
@@ -330,6 +337,7 @@ model Company {
   @@index([ownerId])
   @@index([name])
   @@index([lastActivityAt])
+  @@index([aerolotDealerId])
   @@map("company")
 }
 

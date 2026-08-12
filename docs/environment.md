@@ -117,6 +117,8 @@ single place that knows what is set.
 | `BLOB_READ_WRITE_TOKEN` | Mirrors logos and photos into Blob |
 | `AI_GATEWAY_API_KEY` | The model. Not needed on Vercel (OIDC) |
 | `AGENT_BRIDGE_SECRET` | The rep-facing Agent panel — see `agent.md` |
+| `AEROLOT_DEALERS_PROVISION_SECRET` | Company → Aerolot dealer provision (HMAC). See `docs/dealer-provision.md` |
+| `AEROLOT_DEALERS_PROVISION_URL` | Override provision URL (defaults to Espo dealers path) |
 
 `BLOB_READ_WRITE_TOKEN` is also in `env.validation.ts` and `apps/api/turbo.json`
 because the API and the seed write pictures too. The Next.js app is deliberately

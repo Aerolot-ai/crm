@@ -61,3 +61,26 @@ export const companyBulkOwnerInput = bulkIdsInput.extend({
 });
 
 export type CompanyBulkOwnerInput = z.infer<typeof companyBulkOwnerInput>;
+
+export const companyProvisionDealerInput = z.object({
+	companyId: z.string().min(1),
+	dealershipName: z.string().trim().min(1, "Dealership name is required."),
+	ownerFirstName: z.string().trim().min(1, "Owner first name is required."),
+	ownerLastName: z.string().trim().min(1, "Owner last name is required."),
+	ownerEmail: z.string().trim().email("Owner email is required."),
+	ownerPhone: z.string().trim().min(1, "Owner phone is required."),
+	street: z.string().trim().min(1, "Street address is required."),
+	city: z.string().trim().min(1, "City is required."),
+	state: z
+		.string()
+		.trim()
+		.length(2, "State must be a 2-letter US code.")
+		.transform((value) => value.toUpperCase()),
+	zip: z.string().trim().min(1, "ZIP is required."),
+	planTier: z.enum(["Growth", "Professional", "Enterprise"]),
+	timezone: z.string().trim().min(1, "Timezone is required."),
+});
+
+export type CompanyProvisionDealerInput = z.infer<
+	typeof companyProvisionDealerInput
+>;

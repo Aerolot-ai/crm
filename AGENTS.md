@@ -7,6 +7,7 @@ context until you read them, and the rules in them are not optional.
 | Working on | Read first |
 | --- | --- |
 | Anything in `apps/api` — tRPC, auth, logging, sync, deletes, caching | `docs/api.md` |
+| Company → Aerolot dealer provision | `docs/dealer-provision.md` |
 | `apps/agent` — the eve research agent, tools, tasks, dispatch | `docs/agent.md` |
 | `.env`, configuration, which variables exist and why | `docs/environment.md` |
 | UI in `apps/app` or `packages/ui` | `docs/design.md` (below) |

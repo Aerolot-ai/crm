@@ -6,6 +6,7 @@ import Star from "@carbon/icons-react/es/Star";
 import StarFilled from "@carbon/icons-react/es/StarFilled";
 import UserMultiple from "@carbon/icons-react/es/UserMultiple";
 import type { FieldValueJson } from "@crm/db/fields";
+import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
 import { EmptyCellValue } from "@crm/ui/components/empty-cell";
 import {
@@ -13,8 +14,13 @@ import {
 	type EntityLogoTone,
 } from "@crm/ui/components/entity-logo";
 import { Icon } from "@crm/ui/components/icon";
+import { Link } from "@crm/ui/components/link";
 import { PersonAvatar } from "@crm/ui/components/person-avatar";
 import { SimpleTable, SimpleTableRow } from "@crm/ui/components/simple-table";
+import {
+	StatusIndicator,
+	type StatusTone,
+} from "@crm/ui/components/status-indicator";
 import { TableCell } from "@crm/ui/components/table";
 import {
 	Tooltip,
@@ -44,6 +50,7 @@ import {
 	DetailSheetMain,
 	DetailSheetPending,
 	DetailSheetProperties,
+	DetailSheetProperty,
 	DetailSheetProse,
 	DetailSheetRail,
 	DetailSheetSection,
@@ -52,7 +59,7 @@ import {
 	DetailSheetStats,
 	type DetailSheetTab,
 } from "@/components/detail-sheet";
-import { LocalDay } from "@/components/local-date-time";
+import { LocalDateTime, LocalDay } from "@/components/local-date-time";
 import { OPEN_STAGES } from "@/lib/deal-stage";
 import { ENRICHMENT_POLL_MS, isEnriching } from "@/lib/enrichment-status";
 import { savingField } from "@/lib/pending-field";
@@ -60,6 +67,10 @@ import { hasCompanyLinks } from "@/lib/social-links";
 import { useCrmCache } from "@/lib/trpc/cache";
 import { useTRPC } from "@/lib/trpc/client";
 import type { RouterOutputs } from "@/lib/trpc/types";
+import {
+	isDealerProvisioned,
+	ProvisionDealerDialog,
+} from "./provision-dealer-dialog";
 import { QuickAddContact, QuickAddDeal } from "./quick-add";
 import { RecordActions } from "./record-actions";
 import {
@@ -128,6 +139,80 @@ function nextClose(deals: CompanyDeal[]): string | null {
 		.filter((date): date is string => date !== null)
 		.sort();
 	return dates[0] ?? null;
+}
+
+const PROVISION_LABEL: Record<string, string> = {
+	pending: "Provisioning",
+	provisioned: "Provisioned",
+	failed: "Provision failed",
+	skipped: "Skipped",
+};
+
+const PROVISION_TONE: Record<string, StatusTone> = {
+	pending: "info",
+	provisioned: "success",
+	failed: "error",
+	skipped: "neutral",
+};
+
+function DealerProvisionStatus({ company }: { company: Company }) {
+	const status = company.aerolotProvisionStatus;
+	if (!status) return null;
+
+	const label = PROVISION_LABEL[status] ?? status;
+	const tone = PROVISION_TONE[status] ?? "neutral";
+
+	return (
+		<DetailSheetSection title="Aerolot dealer">
+			<DetailSheetProperties columns={1}>
+				<DetailSheetProperty label="Status">
+					<StatusIndicator
+						tone={tone}
+						busy={status === "pending"}
+						label={label}
+						title={company.aerolotProvisionError ?? undefined}
+					/>
+				</DetailSheetProperty>
+				{company.aerolotDealerId ? (
+					<DetailSheetProperty label="Dealer id">
+						<Badge variant="mono">{company.aerolotDealerId}</Badge>
+					</DetailSheetProperty>
+				) : null}
+				{company.aerolotPortalUrl ? (
+					<DetailSheetProperty label="Portal">
+						<Link
+							href={company.aerolotPortalUrl}
+							target="_blank"
+							rel="noreferrer"
+						>
+							Open portal
+						</Link>
+					</DetailSheetProperty>
+				) : null}
+				{company.aerolotProvisionedAt ? (
+					<DetailSheetProperty label="Provisioned">
+						<LocalDateTime
+							date={company.aerolotProvisionedAt}
+							options={{
+								month: "short",
+								day: "numeric",
+								year: "numeric",
+								hour: "numeric",
+								minute: "2-digit",
+							}}
+						/>
+					</DetailSheetProperty>
+				) : null}
+				{status === "failed" && company.aerolotProvisionError ? (
+					<DetailSheetProperty label="Error">
+						<span className="text-destructive">
+							{company.aerolotProvisionError}
+						</span>
+					</DetailSheetProperty>
+				) : null}
+			</DetailSheetProperties>
+		</DetailSheetSection>
+	);
 }
 
 export function CompanySheet({ companyId }: { companyId: string }) {
@@ -231,12 +316,29 @@ export function CompanySheet({ companyId }: { companyId: string }) {
 				) : undefined
 			}
 			note={
-				company && company.enrichmentStatus !== "COMPLETE" ? (
-					<EnrichmentIndicator
-						status={company.enrichmentStatus}
-						queued={company.queued}
-						title={company.enrichmentError}
-					/>
+				company ? (
+					<>
+						{company.enrichmentStatus !== "COMPLETE" ? (
+							<EnrichmentIndicator
+								status={company.enrichmentStatus}
+								queued={company.queued}
+								title={company.enrichmentError}
+							/>
+						) : null}
+						{company.aerolotProvisionStatus ? (
+							<StatusIndicator
+								tone={
+									PROVISION_TONE[company.aerolotProvisionStatus] ?? "neutral"
+								}
+								busy={company.aerolotProvisionStatus === "pending"}
+								label={
+									PROVISION_LABEL[company.aerolotProvisionStatus] ??
+									company.aerolotProvisionStatus
+								}
+								title={company.aerolotProvisionError ?? undefined}
+							/>
+						) : null}
+					</>
 				) : null
 			}
 			media={
@@ -251,6 +353,21 @@ export function CompanySheet({ companyId }: { companyId: string }) {
 			actions={
 				company ? (
 					<>
+						{isDealerProvisioned(company) ? (
+							company.aerolotPortalUrl ? (
+								<Button asChild variant="outline" size="sm">
+									<a
+										href={company.aerolotPortalUrl}
+										target="_blank"
+										rel="noreferrer"
+									>
+										Open portal
+									</a>
+								</Button>
+							) : null
+						) : (
+							<ProvisionDealerDialog company={company} />
+						)}
 						<EnrichmentActions
 							companyId={company.id}
 							hasDomain={company.domain !== null}
@@ -411,6 +528,8 @@ function CompanyOverview({ company }: { company: Company }) {
 						fields={pendingFields(company)}
 						running={isEnriching(company.enrichmentStatus, company.queued)}
 					/>
+
+					<DealerProvisionStatus company={company} />
 
 					{hasCompanyLinks(company) ? (
 						<DetailSheetSection title="Links">

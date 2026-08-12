@@ -6,6 +6,7 @@ import { TrpcModule } from "../trpc/trpc.module";
 import { CompaniesRouter } from "./companies.router";
 import { CompaniesService } from "./companies.service";
 import { CompanyDirectoryService } from "./company-directory.service";
+import { DealerProvisionService } from "./dealer-provision.service";
 import { FaviconService } from "./favicon.service";
 
 @Module({
@@ -14,8 +15,14 @@ import { FaviconService } from "./favicon.service";
 		CompaniesService,
 		CompanyDirectoryService,
 		CompaniesRouter,
+		DealerProvisionService,
 		FaviconService,
 	],
-	exports: [CompaniesService, CompanyDirectoryService, FaviconService],
+	exports: [
+		CompaniesService,
+		CompanyDirectoryService,
+		DealerProvisionService,
+		FaviconService,
+	],
 })
 export class CompaniesModule {}
