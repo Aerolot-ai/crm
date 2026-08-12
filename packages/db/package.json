@@ -11,6 +11,7 @@
 		"./client": "./src/client.ts",
 		"./currency": "./src/currency.ts",
 		"./crm-events": "./src/crm-events.ts",
+		"./deal-score": "./src/deal-score.ts",
 		"./deal-stage": "./src/deal-stage.ts",
 		"./enums": "./src/generated/prisma/enums.ts",
 		"./favicon": "./src/favicon.ts",
@@ -22,6 +23,7 @@
 		"./safe-fetch": "./src/safe-fetch.ts",
 		"./settings": "./src/settings.ts",
 		"./slack-inventory": "./src/slack-inventory.ts",
+		"./stalled-deals": "./src/stalled-deals.ts",
 		"./tracking": "./src/tracking.ts",
 		"./workspace": "./src/workspace.ts"
 	},

@@ -111,7 +111,7 @@ single place that knows what is set.
 
 | Variable | What it adds |
 | --- | --- |
-| `PERPLEXITY_API_KEY` | Open-web research with citations; finds a LinkedIn slug |
+| `PERPLEXITY_API_KEY` | Open-web research with citations (not identity slug search) |
 | `RAPIDAPI_KEY` | LinkedIn profiles via LinkDAPI |
 | `GITHUB_TOKEN` | Raises the GitHub rate limit from 60/hour |
 | `BLOB_READ_WRITE_TOKEN` | Mirrors logos and photos into Blob |
@@ -122,6 +122,23 @@ single place that knows what is set.
 because the API and the seed write pictures too. The Next.js app is deliberately
 excluded — recognising our URL for the image optimizer needs no token.
 
+### Full agentic mode checklist
+
+Set these for full research + rep Agent panel on production (names only; never
+commit values). Source of truth: `FULL_AGENTIC_CHECKLIST` in
+`apps/agent/agent/lib/capabilities.ts`.
+
+| Source | Kind | Unlocks |
+| --- | --- | --- |
+| `RAPIDAPI_KEY` | env | LinkedIn identity |
+| `PERPLEXITY_API_KEY` | env | Web research / LinkedIn slug search |
+| `BLOB_READ_WRITE_TOKEN` | env | Stored logos and photos |
+| `AGENT_BRIDGE_SECRET` | env | Agent tab + dispatch poke (same value on app and agent) |
+| Settings → General | setting | Context company brand data (not an env var) |
+
+Also needed for the model outside Vercel OIDC: `AI_GATEWAY_API_KEY`. Optional
+rate-limit help for GitHub matching: `GITHUB_TOKEN`.
+
 ### The Context key is asked for, not configured
 
 **`CONTEXT_DEV_API_KEY` is not a variable here and must not become one.** The key lives
@@ -130,10 +147,10 @@ General — an admin who cannot redeploy cannot set a variable.
 
 - **An install that had the variable is asked again**: no migration, no fallback, and
   **the gate cannot be dismissed**.
-- **Nothing is lost while waiting.** A keyless `brand` task settles `SKIPPED` *before*
-  anything marks the row `RUNNING`, and `settle` only overwrites `RUNNING` — so the
-  company stays `PENDING`, which the sweep re-queues
-  (`test/keyless-brand.integration.spec.ts`).
+- **Nothing is lost while waiting.** A keyless `brand` task returns without writing
+  enrichment status (it never marks the row `RUNNING`). On the enrichment path,
+  `settle` only overwrites `RUNNING`. Either way the company stays `PENDING`,
+  which the sweep re-queues (`test/keyless-brand.integration.spec.ts`).
 - **Saving the key runs the company sweep immediately** (fire-and-forget).
 - **`readContextDevKey` (`@crm/db/settings`) is the only reader**, read live with no
   cache. An unreadable database is a capability that is off, not an exception.

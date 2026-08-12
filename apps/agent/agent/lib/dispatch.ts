@@ -9,6 +9,7 @@ import { collapsing, runLimited } from "./pool";
 import { runPortrait } from "./portrait";
 import { runSlackChannelJoin } from "./slack-join-task";
 import { runSlackPeopleMatch } from "./slack-people";
+import { flagStalledDeal } from "./stalled-deal";
 import {
 	claimDue,
 	completeTask,
@@ -143,6 +144,11 @@ async function handleDirect(task: LeasedTask): Promise<void> {
 				? "Queued 1 matching agent run."
 				: `Queued ${queued} matching agent runs.`,
 		);
+		return;
+	}
+
+	if (task.kind === "stalled-deal") {
+		await completeTask(task.id, await flagStalledDeal(task));
 		return;
 	}
 
@@ -413,13 +419,15 @@ function work(kind: string, reason: string): string {
 			return "Work out who this contact actually is, and record what you find. Read what we already have before spending anything.";
 		case "profile":
 		case "recheck":
-			return "Bring this contact's record up to date: their background, their current role, and anything that has changed since we last looked.";
+			return "Bring this contact's record up to date: their background, their current role, and anything that has changed since we last looked. If their employer has moved, load job-change, record the new employer, then call record_job_change without moveToCompanyId.";
 		case "meeting-prep":
-			return "There is a meeting with this person soon. Make sure whoever is taking it opens the record knowing who they are dealing with.";
+			return "There is a meeting with this person soon. Load meeting-prep and identity-matching. If identity is not trustworthy, identify them first. Only then write a brief with write_brief — the tool refuses garbage identity. Leave the panel empty rather than invent.";
 		case "company-profile":
 			return "This company's brand, industry, location and links are filled in separately and may already be there. Read the account, fill anything still missing, and write a brief if there is something worth saying.";
 		case "workspace-profile":
 			return "Write the profile of the company you work for, so that every other session knows who we are. Read our own site and keep it short.";
+		case "deal-score":
+			return "Score this deal from 0–100 and write the forecast context. Read the deal history first. Base the score on stage age, activity recency and cadence, contact coverage (champion and economic buyer), and what the notes say. Call write_deal_intelligence once with the score, a one-paragraph rationale, and a rolling timeline summary. Do not send outreach. Do not change stage or ownership. Do not overwrite forecastContextManual.";
 		default:
 			return `Handle this: ${reason}`;
 	}

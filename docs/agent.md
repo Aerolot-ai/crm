@@ -49,16 +49,27 @@ agent and the API both need it.
 
 | | Kinds | How | Per tick |
 | --- | --- | --- | --- |
-| **Visible** | `brand`, `portrait` | Directly — no `receive`, no model | 60, six at a time |
+| **Direct** | `brand`, `portrait`, `slack-people-match`, `slack-channel-join`, `agent-event` | Directly — no `receive`, no model | 60, six at a time |
 | **Research** | everything else | One eve session per row | 12 |
 
-**Neither visible kind has anything to decide**, and through a session they queued
-behind sixty LLM runs for 25 minutes (`test/lanes.integration.spec.ts`). **The row says
-what the work is; the lane only says whether it needs a conversation.**
+**None of the direct kinds have anything to decide**, and through a session they
+queued behind sixty LLM runs for 25 minutes (`test/lanes.integration.spec.ts`).
+**The row says what the work is; the lane only says whether it needs a
+conversation.** Company brand and contact portrait are what a rep reads *before*
+opening a record. The Slack and event kinds are ops work on the same fast lane so
+they never wait behind research sessions either.
 
-**Priority**: `brand` 900 · `portrait` 800 · `workspace` 500 · `requested` 300 ·
-`meeting` 200 · `identify` 100 · `sweep` 50 · `companyProfile` 40 · `recheck` 0. The
-top two are what a rep reads *before* deciding what to open.
+**Priority**: `slackJoin` 950 · `brand` 900 · `portrait` 800 · `event` 700 ·
+`workspace` 500 · `requested` 300 · `meeting` 200 · `slackPeople` 150 ·
+`stalledDeal` 120 · `identify` 100 · `dealScore` 80 · `sweep` 50 ·
+`companyProfile` 40 · `fieldBackfill` 20 · `recheck` 0. Brand stays at 900 so
+company visual identity claims ahead of every research kind.
+
+**`deal-score`** is a research-lane kind. Nest enqueues it on stage change and on a
+nightly open-deal sweep. The session reads the deal timeline and calls
+`write_deal_intelligence` once. That tool writes `dealScore`, `dealScoreSummary`,
+`dealScoredAt`, and `forecastContext`. It never overwrites `forecastContextManual`.
+The sheet shows the manual forecast when set.
 
 **`claimDue` sorts what it claims** — Postgres does not order `UPDATE … RETURNING` by
 its sub-select's `ORDER BY`.
@@ -189,6 +200,11 @@ states it in the session instructions, and gives tools a shared "not configured,
 retrying will not help" result — **checked before the research budget is charged**. A
 missing key removes a place to look. **Never an error, never throws.**
 
+It tracks `RAPIDAPI_KEY`, `PERPLEXITY_API_KEY`, `BLOB_READ_WRITE_TOKEN`,
+`AGENT_BRIDGE_SECRET`, and the Context key from Settings → General.
+`FULL_AGENTIC_CHECKLIST` / `enableChecklistMarkdown()` is the captain-facing enable
+list (env names only; no secret values).
+
 **`capabilities()` is async** because the Context key is a row;
 `capabilitiesFrom()`/`markdownFor()` are the pure halves. `contextDevKey()` is the only
 resolver, and `lib/context-dev.ts` memoises its client on the key string.
@@ -311,6 +327,13 @@ delegation paths for custom agents.
   team. Scheduled runner sessions use task mode and therefore cannot pause for a
   per-action approval; the deployed permission and idempotent runtime checks are the
   boundary.
+- **Lifecycle specialists are Deploy-gated team agents.** Optional manifest field
+  `lifecycleRole` is one of `qualify` | `engage` | `advance` | `close`. Templates:
+  `lifecycle-qualify.ts`, `lifecycle-engage.ts`, `lifecycle-advance.ts`,
+  `lifecycle-close.ts` under `apps/agent/agent/lib/`. All are recommend-only: CRM
+  note/task plus `run.summary`, no send tools. Engage never sends email or SMS.
+  Advance never mutates deal stage. Close never reopens deals or writes finance
+  fields. Saving never makes a version LIVE.
 - **Approved instructions are system context.** The runner resolves the pinned
   version instructions at `session.started`, then calls `inspect_run` for the manifest
   and current run state. Every runner tool also checks the `team-agent` purpose and
@@ -612,13 +635,14 @@ bun run --filter=agent dispatch
 ```
 
 It drains **both lanes**, exactly as the cron does: up to `VISIBLE_BATCH` (60)
-`brand` and `portrait` rows six at a time, handled in the process with no session
-at all, and `RESEARCH_BATCH` (12) research rows, one session each. So the
-`sessionIds` it prints are the research rows only — a run that resolved forty
-logos prints an empty list and was not idle. Either way it spends real credits, a
-vendor call per visible row and a model session per research one; that is the
-point of it, and the reason it is a command you run rather than a ticker somebody
-leaves on. Watch the agent pane; the session ids it returns are also streamable at
+direct rows (`brand`, `portrait`, and the other `DIRECT_KINDS`) six at a time,
+handled in the process with no session at all, and `RESEARCH_BATCH` (12)
+research rows, one session each. So the `sessionIds` it prints are the research
+rows only — a run that resolved forty logos prints an empty list and was not
+idle. Either way it spends real credits, a vendor call per brand row and a model
+session per research one; that is the point of it, and the reason it is a
+command you run rather than a ticker somebody leaves on. Watch the agent pane;
+the session ids it returns are also streamable at
 `GET /eve/v1/session/:id/stream`.
 
 `eve start` on a built app *does* run the schedule, and so does Vercel, where
