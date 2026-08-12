@@ -122,8 +122,7 @@ export class DealerProvisionService {
 				body = null;
 			}
 		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "fetch_failed";
+			const message = error instanceof Error ? error.message : "fetch_failed";
 			await this.markFailed(companyId, `fetch_error:${message}`);
 			this.logger.error(
 				{ message: "Dealer provision request failed", companyId },

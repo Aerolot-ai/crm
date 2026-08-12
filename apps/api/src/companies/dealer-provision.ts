@@ -212,9 +212,7 @@ export function parseAerolotProvisionResponse(
 	body: unknown,
 ): AerolotProvisionSuccess | AerolotProvisionFailure {
 	const record =
-		body && typeof body === "object"
-			? (body as Record<string, unknown>)
-			: null;
+		body && typeof body === "object" ? (body as Record<string, unknown>) : null;
 
 	if (httpStatus >= 200 && httpStatus < 300 && record?.ok === true) {
 		const dealerId = record.dealerId != null ? String(record.dealerId) : "";
@@ -228,8 +226,7 @@ export function parseAerolotProvisionResponse(
 		return {
 			ok: true,
 			dealerId,
-			portalUrl:
-				record.portalUrl != null ? String(record.portalUrl) : null,
+			portalUrl: record.portalUrl != null ? String(record.portalUrl) : null,
 			alreadyProvisioned: Boolean(record.alreadyProvisioned),
 		};
 	}
