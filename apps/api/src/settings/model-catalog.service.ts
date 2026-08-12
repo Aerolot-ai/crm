@@ -2,7 +2,8 @@ import { CACHE_MANAGER } from "@nestjs/cache-manager";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { Cache } from "cache-manager";
 
-const CATALOG_URL = "https://ai-gateway.vercel.sh/v1/models";
+const OPENROUTER_CATALOG_URL = "https://openrouter.ai/api/v1/models";
+const GATEWAY_CATALOG_URL = "https://ai-gateway.vercel.sh/v1/models";
 
 const CATALOG_TTL_MS = 30 * 60_000;
 
@@ -18,14 +19,40 @@ export interface CatalogModel {
 	pricing: { input: number; output: number } | null;
 }
 
-interface GatewayModel {
+/** Curated tool-use models for direct DeepSeek / OpenRouter (no Vercel Gateway required). */
+export const DIRECT_MODEL_CATALOG: CatalogModel[] = [
+	{
+		id: "deepseek/deepseek-chat",
+		name: "DeepSeek Chat",
+		provider: "deepseek",
+		contextWindowTokens: 128_000,
+		pricing: null,
+	},
+	{
+		id: "deepseek/deepseek-reasoner",
+		name: "DeepSeek Reasoner",
+		provider: "deepseek",
+		contextWindowTokens: 128_000,
+		pricing: null,
+	},
+	{
+		id: "deepseek/deepseek-chat-v3-0324",
+		name: "DeepSeek Chat V3 (OpenRouter)",
+		provider: "deepseek",
+		contextWindowTokens: 128_000,
+		pricing: null,
+	},
+];
+
+interface RemoteModel {
 	id?: unknown;
 	name?: unknown;
 	owned_by?: unknown;
 	type?: unknown;
 	tags?: unknown;
 	context_window?: unknown;
-	pricing?: { input?: unknown; output?: unknown } | null;
+	context_length?: unknown;
+	pricing?: { input?: unknown; output?: unknown; prompt?: unknown; completion?: unknown } | null;
 }
 
 function rate(value: unknown): number | null {
@@ -33,7 +60,7 @@ function rate(value: unknown): number | null {
 	return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : null;
 }
 
-function usable(model: GatewayModel): boolean {
+function usableGateway(model: RemoteModel): boolean {
 	const tags = Array.isArray(model.tags) ? model.tags : [];
 	return (
 		typeof model.id === "string" &&
@@ -41,6 +68,13 @@ function usable(model: GatewayModel): boolean {
 		tags.includes("tool-use") &&
 		typeof model.context_window === "number"
 	);
+}
+
+function usableOpenRouter(model: RemoteModel): boolean {
+	if (typeof model.id !== "string") return false;
+	const id = model.id.toLowerCase();
+	// Prefer DeepSeek tool-capable chat models on OpenRouter.
+	return id.includes("deepseek") && !id.includes("r1-zero");
 }
 
 @Injectable()
@@ -66,8 +100,100 @@ export class ModelCatalogService {
 	}
 
 	private async fetchCatalog(): Promise<CatalogModel[] | null> {
+		const direct =
+			Boolean(process.env.DEEPSEEK_API_KEY?.trim()) ||
+			Boolean(process.env.OPENROUTER_API_KEY?.trim()) ||
+			Boolean(
+				process.env.OPENAI_API_BASE_URL?.includes("deepseek") &&
+					process.env.OPENAI_API_KEY?.trim(),
+			);
+
+		if (direct) {
+			const remote = await this.fetchOpenRouterDeepseek();
+			const merged = this.mergeCatalogs(DIRECT_MODEL_CATALOG, remote ?? []);
+			this.logger.log({
+				message: "Model catalog loaded (direct DeepSeek/OpenRouter)",
+				models: merged.length,
+			});
+			return merged;
+		}
+
+		const gateway = await this.fetchGateway();
+		if (gateway?.length) {
+			this.logger.log({
+				message: "Model catalog loaded (Vercel AI Gateway)",
+				models: gateway.length,
+			});
+			return gateway;
+		}
+
+		// Always offer curated DeepSeek ids so Settings can pin before keys land.
+		return DIRECT_MODEL_CATALOG;
+	}
+
+	private mergeCatalogs(
+		base: CatalogModel[],
+		extra: CatalogModel[],
+	): CatalogModel[] {
+		const byId = new Map<string, CatalogModel>();
+		for (const model of [...base, ...extra]) {
+			byId.set(model.id, model);
+		}
+		return [...byId.values()].sort(
+			(a, b) =>
+				a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name),
+		);
+	}
+
+	private async fetchOpenRouterDeepseek(): Promise<CatalogModel[] | null> {
+		const key = process.env.OPENROUTER_API_KEY?.trim();
+		if (!key) return null;
 		try {
-			const response = await fetch(CATALOG_URL, {
+			const response = await fetch(OPENROUTER_CATALOG_URL, {
+				headers: {
+					accept: "application/json",
+					authorization: `Bearer ${key}`,
+				},
+				signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
+			});
+			if (!response.ok) return null;
+			const body = (await response.json()) as { data?: unknown };
+			const rows = Array.isArray(body.data)
+				? (body.data as RemoteModel[])
+				: [];
+			return rows.filter(usableOpenRouter).map((model): CatalogModel => {
+				const id = model.id as string;
+				const ctx =
+					typeof model.context_length === "number"
+						? model.context_length
+						: typeof model.context_window === "number"
+							? model.context_window
+							: 128_000;
+				const input = rate(model.pricing?.prompt ?? model.pricing?.input);
+				const output = rate(
+					model.pricing?.completion ?? model.pricing?.output,
+				);
+				return {
+					id,
+					name: typeof model.name === "string" && model.name ? model.name : id,
+					provider: id.split("/")[0] ?? "openrouter",
+					contextWindowTokens: ctx,
+					pricing:
+						input !== null && output !== null ? { input, output } : null,
+				};
+			});
+		} catch (error) {
+			this.logger.warn({
+				message: "OpenRouter catalog unavailable",
+				reason: error instanceof Error ? error.message : String(error),
+			});
+			return null;
+		}
+	}
+
+	private async fetchGateway(): Promise<CatalogModel[] | null> {
+		try {
+			const response = await fetch(GATEWAY_CATALOG_URL, {
 				headers: { accept: "application/json" },
 				signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
 			});
@@ -82,10 +208,10 @@ export class ModelCatalogService {
 
 			const body = (await response.json()) as { data?: unknown };
 			const rows = Array.isArray(body.data)
-				? (body.data as GatewayModel[])
+				? (body.data as RemoteModel[])
 				: [];
 
-			const models = rows.filter(usable).map((model): CatalogModel => {
+			const models = rows.filter(usableGateway).map((model): CatalogModel => {
 				const id = model.id as string;
 				const input = rate(model.pricing?.input);
 				const output = rate(model.pricing?.output);
@@ -107,15 +233,10 @@ export class ModelCatalogService {
 					a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name),
 			);
 
-			this.logger.log({
-				message: "Model catalog loaded",
-				models: models.length,
-			});
-
 			return models;
 		} catch (error) {
 			this.logger.warn({
-				message: "Model catalog unavailable",
+				message: "Gateway catalog unavailable",
 				reason: error instanceof Error ? error.message : String(error),
 			});
 			return null;
