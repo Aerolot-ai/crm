@@ -86,7 +86,7 @@ async function main() {
 		}
 
 		const existing = await db.agentDefinition.findMany({
-			where: { status: { in: ["LIVE", "READY", "DRAFT"] } },
+			where: { status: { notIn: ["ARCHIVED", "DELETED"] } },
 			select: {
 				id: true,
 				name: true,
