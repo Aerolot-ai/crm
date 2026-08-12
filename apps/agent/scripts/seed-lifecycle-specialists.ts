@@ -9,37 +9,52 @@ import { db } from "@crm/db";
 import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 import { readLifecycleRole } from "@crm/validation";
 import {
+	ADVANCE_SPECIALIST_DESCRIPTION,
 	ADVANCE_SPECIALIST_INSTRUCTIONS,
+	ADVANCE_SPECIALIST_NAME,
 	advanceSpecialistManifest,
 } from "../agent/lib/lifecycle-advance";
 import {
+	CLOSE_SPECIALIST_DESCRIPTION,
 	CLOSE_SPECIALIST_INSTRUCTIONS,
+	CLOSE_SPECIALIST_NAME,
 	closeSpecialistManifest,
 } from "../agent/lib/lifecycle-close";
 import {
+	ENGAGE_SPECIALIST_DESCRIPTION,
 	ENGAGE_SPECIALIST_INSTRUCTIONS,
+	ENGAGE_SPECIALIST_NAME,
 	engageSpecialistManifest,
 } from "../agent/lib/lifecycle-engage";
 import {
+	QUALIFY_SPECIALIST_DESCRIPTION,
 	QUALIFY_SPECIALIST_INSTRUCTIONS,
+	QUALIFY_SPECIALIST_NAME,
 	qualifySpecialistManifest,
 } from "../agent/lib/lifecycle-qualify";
 
 const SPECIALISTS = [
 	{
+		name: QUALIFY_SPECIALIST_NAME,
+		description: QUALIFY_SPECIALIST_DESCRIPTION,
 		instructions: QUALIFY_SPECIALIST_INSTRUCTIONS,
 		manifest: () => qualifySpecialistManifest({ recordScope: "WORKSPACE" }),
 	},
 	{
+		name: ENGAGE_SPECIALIST_NAME,
+		description: ENGAGE_SPECIALIST_DESCRIPTION,
 		instructions: ENGAGE_SPECIALIST_INSTRUCTIONS,
-		// Workspace seed so Deploy works without pre-selected records.
 		manifest: () => engageSpecialistManifest({ recordScope: "WORKSPACE" }),
 	},
 	{
+		name: ADVANCE_SPECIALIST_NAME,
+		description: ADVANCE_SPECIALIST_DESCRIPTION,
 		instructions: ADVANCE_SPECIALIST_INSTRUCTIONS,
 		manifest: () => advanceSpecialistManifest({ recordScope: "WORKSPACE" }),
 	},
 	{
+		name: CLOSE_SPECIALIST_NAME,
+		description: CLOSE_SPECIALIST_DESCRIPTION,
 		instructions: CLOSE_SPECIALIST_INSTRUCTIONS,
 		manifest: () => closeSpecialistManifest({ recordScope: "WORKSPACE" }),
 	},
@@ -106,8 +121,8 @@ async function main() {
 
 		const agent = await db.agentDefinition.create({
 			data: {
-				name: manifest.name,
-				description: manifest.description,
+				name: specialist.name,
+				description: specialist.description,
 				status: "LIVE",
 				createdById: owner.id,
 			},
