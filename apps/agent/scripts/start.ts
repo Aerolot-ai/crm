@@ -10,10 +10,16 @@ if (!Number.isInteger(port) || port < 1 || port > 65_535) {
 	);
 }
 
+const pathEnv = [
+	`${process.cwd()}/node_modules/.bin`,
+	`${process.cwd()}/../../node_modules/.bin`,
+	process.env.PATH ?? "",
+].join(":");
 const cli = process.platform === "win32" ? "eve.cmd" : "eve";
 const child = spawn(cli, ["start", "--port", String(port)], {
 	stdio: "inherit",
-	env: process.env,
+	env: { ...process.env, PATH: pathEnv },
+	shell: false,
 });
 
 let settled = false;
