@@ -50,7 +50,8 @@ export function capabilitiesFrom(
 		{
 			...fromEnv("PERPLEXITY_API_KEY"),
 			label: "Web research",
-			gives: "open-web context with citations for research, not for identity matching",
+			gives:
+				"open-web context with citations for research, not for identity matching",
 		},
 		{
 			id: CONTEXT_DEV,
