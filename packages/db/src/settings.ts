@@ -8,8 +8,8 @@ import {
 export const SETTINGS_ID = "app";
 
 export const DEFAULT_AGENT_MODEL = {
-	id: "zai/glm-5.2-fast",
-	contextWindowTokens: 1_000_000,
+	id: "deepseek/deepseek-chat",
+	contextWindowTokens: 128_000,
 } as const;
 
 export interface AgentModelSetting {

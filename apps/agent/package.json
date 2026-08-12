@@ -7,6 +7,7 @@
 	"scripts": {
 		"backfill:facts": "bun scripts/backfill-empty-facts.ts",
 		"backfill:images": "bun scripts/backfill-brand-images.ts",
+		"seed:lifecycle": "bun scripts/seed-lifecycle-specialists.ts",
 		"dev": "eve dev",
 		"dev:headless": "eve dev --no-ui",
 		"dispatch": "curl -fsS -X POST \"${AGENT_URL:-http://127.0.0.1:2000}/eve/v1/dev/schedules/dispatch\"",
@@ -19,10 +20,12 @@
 		"clean": "rm -rf .turbo .eve node_modules"
 	},
 	"dependencies": {
+		"@ai-sdk/openai": "^2.0.42",
 		"@crm/db": "workspace:*",
 		"@crm/env": "workspace:*",
 		"@crm/telemetry": "workspace:*",
 		"@crm/validation": "workspace:*",
+		"ai": "^5.0.60",
 		"context.dev": "^2.7.0",
 		"eve": "^0.29.4",
 		"zod": "^4.4.3"
