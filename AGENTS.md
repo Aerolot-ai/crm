@@ -16,6 +16,7 @@ context until you read them, and the rules in them are not optional.
 | The tracking script, the collector, form submissions | `docs/tracking.md` |
 | Running it locally, Google Cloud, DB commands, secrets | `docs/setup.md` |
 | Anything that sends a telemetry event, or a new property on one | `docs/telemetry.md` |
+| aisales Aerolot Sales workspace shape (fields, ICP, seed) | `docs/aisales-sales-config.md` |
 | `.github/workflows`, versions, changelog, how a change reaches `release` | `CONTRIBUTING.md` |
 
 Also check `.agents/skills/` for a relevant skill before starting — better-auth,
@@ -298,3 +299,10 @@ For pull requests, include the task ID in the title:
 ```
 MDN-42 fix: resolve auth token expiry
 ```
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

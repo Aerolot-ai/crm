@@ -130,9 +130,9 @@ export function DashboardSummary() {
 			<div className="grid gap-6 @3xl/page-content:grid-cols-2">
 				<Card className="min-w-0">
 					<CardHeader>
-						<CardTitle>Deals in progress</CardTitle>
+						<CardTitle>Largest open software deals</CardTitle>
 						<CardDescription>
-							The largest open deals, and how long each has sat in its stage
+							Biggest open SaaS deals and how long each sat in its stage
 						</CardDescription>
 						<CardAction>
 							<Button asChild variant="contrast" size="sm">

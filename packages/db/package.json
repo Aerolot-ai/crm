@@ -6,6 +6,7 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./agent-tasks": "./src/agent-tasks.ts",
+		"./aerolot-sales-config": "./src/aerolot-sales-config.ts",
 		"./attribution": "./src/attribution.ts",
 		"./blob": "./src/blob.ts",
 		"./client": "./src/client.ts",
@@ -36,6 +37,7 @@
 		"db:push": "bun scripts/require-local-db.ts db:push && prisma db push",
 		"db:reset": "bun scripts/require-local-db.ts db:reset && prisma migrate reset",
 		"db:seed": "bun scripts/require-local-db.ts db:seed && prisma db seed",
+		"db:seed:aerolot-sales": "bun scripts/require-local-db.ts db:seed:aerolot-sales && bun prisma/seed-aerolot-sales.ts",
 		"db:studio": "prisma studio",
 		"db:test": "bun scripts/test-db.ts",
 		"test": "bun test",

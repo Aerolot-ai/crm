@@ -94,7 +94,7 @@ export function SalesDashboard({ summary }: { summary: Summary }) {
 					description={`${formatCount(wonThisMonth.count, "deal")} · ${money(wonPrevMonth.valueCents)} last month`}
 				/>
 				<StatCard
-					label="Open pipeline"
+					label="Open SaaS pipeline"
 					value={money(pipeline.totalCents)}
 					description={`${formatCount(pipeline.totalDeals, "deal")} in progress · ${money(closingThisMonthTotal.valueCents)} due this month`}
 				/>
@@ -168,8 +168,8 @@ export function SalesDashboard({ summary }: { summary: Summary }) {
 				</ChartPanel>
 
 				<ChartPanel
-					title="Open pipeline by stage"
-					description="Where the value sits right now"
+					title="Open SaaS pipeline by stage"
+					description="Software deals by stage — not inventory or recon work"
 				>
 					{stageSlices.length > 0 ? (
 						<div className="flex flex-1 flex-col justify-between gap-1 pt-4">

@@ -9,7 +9,8 @@ export function OverviewGreetingFallback() {
 		<>
 			<PageShellTitle>Welcome back</PageShellTitle>
 			<PageShellDescription>
-				What you have closed, what is still in play, and what needs you today.
+				SaaS pipeline: closed won, open value by stage, and work that needs you
+				today.
 			</PageShellDescription>
 		</>
 	);
@@ -23,8 +24,8 @@ export function OverviewGreeting() {
 			<PageShellTitle>Welcome back</PageShellTitle>
 			<PageShellDescription>
 				{scope === "me"
-					? "What you have closed, what is still in play, and what needs you today."
-					: "What the team has closed, what is still in play, and what needs you today."}
+					? "Your SaaS pipeline: closed won, open value by stage, and work that needs you today."
+					: "Team SaaS pipeline: closed won, open value by stage, and work that needs you today."}
 			</PageShellDescription>
 		</>
 	);
