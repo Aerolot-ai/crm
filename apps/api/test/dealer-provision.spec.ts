@@ -1,11 +1,5 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createHmac } from "node:crypto";
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	it,
-} from "bun:test";
 import {
 	BadRequestException,
 	NotFoundException,
@@ -13,16 +7,16 @@ import {
 } from "@nestjs/common";
 import {
 	buildSalesEspoPayload,
+	type DealerProvisionFields,
 	normalizePhoneE164,
 	parseAerolotProvisionResponse,
 	provisionRequestHeaders,
 	signAerolotProvisionBody,
-	validateDealerProvisionFields,
-	type DealerProvisionFields,
 	type ValidatedDealerProvision,
+	validateDealerProvisionFields,
 } from "../src/companies/dealer-provision";
-import { DEALER_PROVISION } from "../src/companies/dealer-provision-config";
 import { DealerProvisionService } from "../src/companies/dealer-provision.service";
+import { DEALER_PROVISION } from "../src/companies/dealer-provision-config";
 
 const validFields = (): DealerProvisionFields => ({
 	dealershipName: "Palm Beach Motors",
@@ -201,9 +195,7 @@ describe("validateDealerProvisionFields", () => {
 			});
 			expect(result.ok).toBe(false);
 			if (result.ok) continue;
-			expect(result.missing).toContain(
-				"State (2-letter US code, e.g. FL)",
-			);
+			expect(result.missing).toContain("State (2-letter US code, e.g. FL)");
 		}
 	});
 
@@ -230,11 +222,7 @@ describe("validateDealerProvisionFields", () => {
 	});
 
 	it("accepts every known plan tier case-insensitively", () => {
-		for (const planTier of [
-			"Growth",
-			"professional",
-			"ENTERPRISE",
-		] as const) {
+		for (const planTier of ["Growth", "professional", "ENTERPRISE"] as const) {
 			const result = validateDealerProvisionFields({
 				...validFields(),
 				planTier,
@@ -305,24 +293,15 @@ describe("signAerolotProvisionBody and provisionRequestHeaders", () => {
 	});
 
 	it("sets Idempotency-Key aisales:company:{id} and the HMAC headers", () => {
-		const headers = provisionRequestHeaders(
-			rawBody,
-			secret,
-			companyId,
-			nowSec,
-		);
+		const headers = provisionRequestHeaders(rawBody, secret, companyId, nowSec);
 
 		expect(headers["Content-Type"]).toBe("application/json");
-		expect(headers["Idempotency-Key"]).toBe(
-			`aisales:company:${companyId}`,
-		);
+		expect(headers["Idempotency-Key"]).toBe(`aisales:company:${companyId}`);
 		expect(headers["X-Aerolot-Timestamp"]).toBe(String(nowSec));
 		expect(headers["X-Aerolot-Signature"]).toBe(
 			signAerolotProvisionBody(rawBody, nowSec, secret),
 		);
-		expect(headers["X-Aerolot-Signature"].startsWith("sha256=")).toBe(
-			true,
-		);
+		expect(headers["X-Aerolot-Signature"].startsWith("sha256=")).toBe(true);
 	});
 });
 
@@ -470,7 +449,10 @@ describe("DealerProvisionService", () => {
 	});
 
 	function stubFetch(status: number, body: unknown) {
-		globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+		globalThis.fetch = (async (
+			url: string | URL | Request,
+			init?: RequestInit,
+		) => {
 			fetchCalls.push({
 				url: typeof url === "string" ? url : url.toString(),
 				init,
@@ -479,7 +461,7 @@ describe("DealerProvisionService", () => {
 				status,
 				headers: { "content-type": "application/json" },
 			});
-		}) as typeof fetch;
+		}) as unknown as typeof fetch;
 	}
 
 	it("returns early when the company is already provisioned, without fetch", async () => {
@@ -498,7 +480,7 @@ describe("DealerProvisionService", () => {
 		globalThis.fetch = (async () => {
 			fetchHit = true;
 			return new Response("{}", { status: 200 });
-		}) as typeof fetch;
+		}) as unknown as typeof fetch;
 
 		const result = await service.provision(companyId, validFields());
 
@@ -529,7 +511,7 @@ describe("DealerProvisionService", () => {
 		globalThis.fetch = (async () => {
 			fetchHit = true;
 			return new Response("{}", { status: 200 });
-		}) as typeof fetch;
+		}) as unknown as typeof fetch;
 
 		await expect(
 			service.provision(companyId, {
@@ -566,15 +548,15 @@ describe("DealerProvisionService", () => {
 		globalThis.fetch = (async () => {
 			fetchHit = true;
 			return new Response("{}", { status: 200 });
-		}) as typeof fetch;
+		}) as unknown as typeof fetch;
 
-		await expect(
-			service.provision(companyId, validFields()),
-		).rejects.toThrow(ServiceUnavailableException);
+		await expect(service.provision(companyId, validFields())).rejects.toThrow(
+			ServiceUnavailableException,
+		);
 
-		await expect(
-			service.provision(companyId, validFields()),
-		).rejects.toThrow(/AEROLOT_DEALERS_PROVISION_SECRET/);
+		await expect(service.provision(companyId, validFields())).rejects.toThrow(
+			/AEROLOT_DEALERS_PROVISION_SECRET/,
+		);
 
 		expect(fetchHit).toBe(false);
 		expect(updates).toHaveLength(0);
@@ -584,9 +566,9 @@ describe("DealerProvisionService", () => {
 		const { db } = createMockDb(null);
 		const service = new DealerProvisionService(db);
 
-		await expect(
-			service.provision("missing", validFields()),
-		).rejects.toThrow(NotFoundException);
+		await expect(service.provision("missing", validFields())).rejects.toThrow(
+			NotFoundException,
+		);
 	});
 
 	it("POSTs with HMAC headers and writes provisioned status on success", async () => {
@@ -618,18 +600,11 @@ describe("DealerProvisionService", () => {
 
 		const headers = call.init?.headers as Record<string, string>;
 		expect(headers["Content-Type"]).toBe("application/json");
-		expect(headers["Idempotency-Key"]).toBe(
-			`aisales:company:${companyId}`,
-		);
-		expect(headers["X-Aerolot-Signature"].startsWith("sha256=")).toBe(
-			true,
-		);
+		expect(headers["Idempotency-Key"]).toBe(`aisales:company:${companyId}`);
+		expect(headers["X-Aerolot-Signature"]?.startsWith("sha256=")).toBe(true);
 		expect(headers["X-Aerolot-Timestamp"]).toMatch(/^\d+$/);
 
-		const body = JSON.parse(String(call.init?.body)) as Record<
-			string,
-			unknown
-		>;
+		const body = JSON.parse(String(call.init?.body)) as Record<string, unknown>;
 		expect(body.espoAccountId).toBe(`aisales:${companyId}`);
 		expect(body.website).toBe("https://palmbeach.test");
 		expect(body.phoneNumber).toBe("+15615550100");
@@ -645,9 +620,7 @@ describe("DealerProvisionService", () => {
 		expect(result.aerolotProvisionStatus).toBe(
 			DEALER_PROVISION.statuses.provisioned,
 		);
-		expect(result.aerolotPortalUrl).toBe(
-			"https://portal.aerolot.test/new",
-		);
+		expect(result.aerolotPortalUrl).toBe("https://portal.aerolot.test/new");
 		expect(result.alreadyProvisioned).toBe(false);
 		expect(result.aerolotProvisionedAt).toBeTruthy();
 
@@ -683,9 +656,9 @@ describe("DealerProvisionService", () => {
 			missing: ["ownerEmail"],
 		});
 
-		await expect(
-			service.provision(companyId, validFields()),
-		).rejects.toThrow(/Aerolot rejected the provision: ownerEmail/);
+		await expect(service.provision(companyId, validFields())).rejects.toThrow(
+			/Aerolot rejected the provision: ownerEmail/,
+		);
 
 		expect(updates.at(-1)).toMatchObject({
 			aerolotProvisionStatus: DEALER_PROVISION.statuses.failed,
@@ -706,11 +679,11 @@ describe("DealerProvisionService", () => {
 		const service = new DealerProvisionService(db);
 		globalThis.fetch = (async () => {
 			throw new Error("connect ECONNREFUSED");
-		}) as typeof fetch;
+		}) as unknown as typeof fetch;
 
-		await expect(
-			service.provision(companyId, validFields()),
-		).rejects.toThrow(ServiceUnavailableException);
+		await expect(service.provision(companyId, validFields())).rejects.toThrow(
+			ServiceUnavailableException,
+		);
 
 		expect(updates.at(-1)).toMatchObject({
 			aerolotProvisionStatus: DEALER_PROVISION.statuses.failed,
