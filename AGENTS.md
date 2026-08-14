@@ -6,7 +6,9 @@ context until you read them, and the rules in them are not optional.
 
 | Working on | Read first |
 | --- | --- |
+| Remotes, aisales.aerolot.ai, which GitHub this is | `docs/aisales.md` |
 | Anything in `apps/api` — tRPC, auth, logging, sync, deletes, caching | `docs/api.md` |
+| Company → Aerolot dealer provision | `docs/dealer-provision.md` |
 | `apps/agent` — the eve research agent, tools, tasks, dispatch | `docs/agent.md` |
 | `.env`, configuration, which variables exist and why | `docs/environment.md` |
 | UI in `apps/app` or `packages/ui` | `docs/design.md` (below) |
@@ -24,6 +26,9 @@ rules and skills you read.
 
 ## Always true
 
+- **This install is Aerolot aisales.** GitHub is `Aerolot-ai/crm`. Push only
+  there. `trycompai/crm` is public upstream, fetch-only. Never use
+  `trycrm-convex`. See `docs/aisales.md`.
 - **Never add code comments.** Not to new code, not to code you edit.
 - **No coauthoring commits.** No `Co-Authored-By` trailer, ever.
 - **Intelligence lives in `apps/agent`, never in the API.** No vendor client, no

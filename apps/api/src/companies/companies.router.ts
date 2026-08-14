@@ -17,16 +17,20 @@ import {
 	companyIdInput,
 	companyListInput,
 	companyOptionsInput,
+	companyProvisionDealerInput,
 	companyUpdateArgs,
 	setPrimaryContactInput,
 } from "./companies.contracts";
 import { CompaniesService } from "./companies.service";
+import { DealerProvisionService } from "./dealer-provision.service";
 
 @Router({ alias: "companies" })
 @UseMiddlewares(AuthMiddleware)
 export class CompaniesRouter {
 	constructor(
 		@Inject(CompaniesService) private readonly companies: CompaniesService,
+		@Inject(DealerProvisionService)
+		private readonly dealerProvision: DealerProvisionService,
 	) {}
 
 	@Query({ input: companyListInput })
@@ -89,5 +93,13 @@ export class CompaniesRouter {
 		@Input() input: z.infer<typeof setPrimaryContactInput>,
 	) {
 		return this.companies.setPrimaryContact(input.companyId, input.contactId);
+	}
+
+	@Mutation({ input: companyProvisionDealerInput })
+	async provisionDealer(
+		@Input() input: z.infer<typeof companyProvisionDealerInput>,
+	) {
+		const { companyId, ...fields } = input;
+		return this.dealerProvision.provision(companyId, fields);
 	}
 }

@@ -205,6 +205,12 @@ export class CompaniesService {
 				enrichmentStatus: true,
 				enrichedAt: true,
 				enrichmentError: true,
+				aerolotDealerId: true,
+				aerolotProvisionStatus: true,
+				aerolotProvisionError: true,
+				aerolotPortalUrl: true,
+				aerolotProvisionedAt: true,
+				aerolotProvisionSource: true,
 				source: true,
 				createdAt: true,
 				owner: { select: OWNER_SELECT },
@@ -250,7 +256,14 @@ export class CompaniesService {
 			throw new NotFoundException(`No company with id ${id}.`);
 		}
 
-		const { deals, primaryContact, enrichedAt, createdAt, ...rest } = company;
+		const {
+			deals,
+			primaryContact,
+			enrichedAt,
+			createdAt,
+			aerolotProvisionedAt,
+			...rest
+		} = company;
 
 		return {
 			...rest,
@@ -258,6 +271,7 @@ export class CompaniesService {
 			queued: await this.queue.isQueued({ companyId: id }),
 			createdAt: createdAt.toISOString(),
 			enrichedAt: enrichedAt?.toISOString() ?? null,
+			aerolotProvisionedAt: aerolotProvisionedAt?.toISOString() ?? null,
 			primaryContactId: primaryContact?.id ?? null,
 			primaryContact,
 			reportingCurrency: await this.conversion.reportingCurrency(),

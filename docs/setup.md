@@ -1,5 +1,8 @@
 # Setup and local development
 
+This clone is Aerolot aisales. Git remotes and the Convex split are in
+`docs/aisales.md`. Read that first.
+
 Operational detail moved out of the rule docs. `api.md`, `agent.md` and
 `environment.md` are what agents read before changing code; this is what a person
 reads once.
