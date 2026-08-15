@@ -202,9 +202,7 @@ export function enableChecklistMarkdown(
 	for (const item of FULL_AGENTIC_CHECKLIST) {
 		if (item.kind === "env") {
 			const on = byId.get(item.id)?.enabled === true;
-			lines.push(
-				`- [${on ? "x" : " "}] \`${item.source}\` — ${item.label}`,
-			);
+			lines.push(`- [${on ? "x" : " "}] \`${item.source}\` — ${item.label}`);
 		} else {
 			const on = byId.get(item.id)?.enabled === true;
 			lines.push(
