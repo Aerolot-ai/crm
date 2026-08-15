@@ -3,6 +3,13 @@ import { CRM_EVENT_CATALOG, isCrmEventType } from "@crm/db/crm-events";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
 import type { SendFn } from "eve/channels";
 import { DISPATCH } from "./dispatch-config";
+import {
+	buildRunPolicySnapshot,
+	inputHasPolicy,
+	mergeRunInputWithPolicy,
+	readAutonomyFlags,
+	readSellerRulesVersion,
+} from "./run-policy-snapshot";
 import { DEPENDENCY_UNAVAILABLE, runDependencyFailure } from "./run-preflight";
 import {
 	isTerminalRunStatus,
@@ -241,6 +248,18 @@ export async function queueDueAgentRuns(now = new Date()): Promise<number> {
 			});
 			if (updated.count === 0) return false;
 
+			const version = await tx.agentVersion.findUniqueOrThrow({
+				where: { id: trigger.versionId },
+				select: { id: true, manifest: true },
+			});
+			const policy = buildRunPolicySnapshot({
+				agentVersionId: version.id,
+				manifest: version.manifest,
+				triggerType: "SCHEDULE",
+				sellerRulesVersion: readSellerRulesVersion(),
+				autonomy: readAutonomyFlags(),
+			});
+
 			await tx.agentRun.upsert({
 				where: { idempotencyKey },
 				create: {
@@ -250,7 +269,10 @@ export async function queueDueAgentRuns(now = new Date()): Promise<number> {
 					triggerType: "SCHEDULE",
 					idempotencyKey,
 					correlationId: crypto.randomUUID(),
-					input: { scheduledFor: scheduledAt.toISOString() },
+					input: mergeRunInputWithPolicy(
+						{ scheduledFor: scheduledAt.toISOString() },
+						policy,
+					),
 					events: {
 						create: { sequence: 0, type: "run.queued", data: {} },
 					},
@@ -312,9 +334,30 @@ export async function queueEventAgentRuns(
 		},
 	});
 
+	const versions = await db.agentVersion.findMany({
+		where: {
+			id: { in: [...new Set(triggers.map((trigger) => trigger.versionId))] },
+		},
+		select: { id: true, manifest: true },
+	});
+	const versionsById = new Map(
+		versions.map((version) => [version.id, version]),
+	);
+
 	let matched = 0;
 	for (const trigger of triggers) {
 		if (recordOf(trigger.config).event !== eventType) continue;
+		const version = versionsById.get(trigger.versionId);
+		if (!version) {
+			throw new Error("The queued agent version is missing.");
+		}
+		const policy = buildRunPolicySnapshot({
+			agentVersionId: version.id,
+			manifest: version.manifest,
+			triggerType: "EVENT",
+			sellerRulesVersion: readSellerRulesVersion(),
+			autonomy: readAutonomyFlags(),
+		});
 		const idempotencyKey = `event:${task.id}:trigger:${trigger.id}`;
 
 		const queued = await db.$transaction(async (tx) => {
@@ -339,14 +382,17 @@ export async function queueEventAgentRuns(
 					triggerType: "EVENT",
 					idempotencyKey,
 					correlationId: `trigger:${trigger.id}:event:${task.id}`,
-					input: {
-						event: {
-							type: eventType,
-							occurredAt,
-							data: recordOf(payload.data),
+					input: mergeRunInputWithPolicy(
+						{
+							event: {
+								type: eventType,
+								occurredAt,
+								data: recordOf(payload.data),
+							},
+							record: { kind: recordKind, id: recordId },
 						},
-						record: { kind: recordKind, id: recordId },
-					} as Prisma.InputJsonValue,
+						policy,
+					),
 					events: {
 						create: {
 							sequence: 0,
@@ -441,10 +487,12 @@ export async function dispatchAgentRun(runId: string, send: SendFn) {
 			agentId: true,
 			versionId: true,
 			initiatedById: true,
+			input: true,
+			triggerType: true,
 			agent: {
 				select: { name: true, createdById: true, status: true },
 			},
-			version: { select: { modelId: true } },
+			version: { select: { modelId: true, manifest: true } },
 		},
 	});
 	if (run?.status !== "QUEUED" || run.agent.status !== "LIVE") {
@@ -470,13 +518,27 @@ export async function dispatchAgentRun(runId: string, send: SendFn) {
 		});
 		if (active) return "deferred" as const;
 
+		const startData: Prisma.AgentRunUpdateManyMutationInput = {
+			status: "RUNNING",
+			startedAt: new Date(),
+			modelId: run.version.modelId,
+		};
+		if (!inputHasPolicy(run.input)) {
+			startData.input = mergeRunInputWithPolicy(
+				recordOf(run.input),
+				buildRunPolicySnapshot({
+					agentVersionId: run.versionId,
+					manifest: run.version.manifest,
+					triggerType: run.triggerType,
+					sellerRulesVersion: readSellerRulesVersion(),
+					autonomy: readAutonomyFlags(),
+				}),
+			);
+		}
+
 		const updated = await tx.agentRun.updateMany({
 			where: { id: runId, status: "QUEUED" },
-			data: {
-				status: "RUNNING",
-				startedAt: new Date(),
-				modelId: run.version.modelId,
-			},
+			data: startData,
 		});
 		return updated.count === 1
 			? ("claimed" as const)
