@@ -121,6 +121,33 @@ export async function writeRatesRefreshedAt(
 	});
 }
 
+export const DEFAULT_COST_DAILY_USD_CAP = 10_000;
+export const COST_DAILY_WARN_RATIO = 0.8;
+
+export async function readCostDailyUsdCap(db: Db): Promise<number> {
+	const row = await db.appSetting.findUnique({
+		where: { id: SETTINGS_ID },
+		select: { costDailyUsdCap: true },
+	});
+	const stored =
+		row?.costDailyUsdCap == null ? null : Number(row.costDailyUsdCap);
+	if (stored != null && Number.isFinite(stored) && stored > 0) {
+		return stored;
+	}
+	return DEFAULT_COST_DAILY_USD_CAP;
+}
+
+export async function writeCostDailyUsdCap(
+	db: Db,
+	costDailyUsdCap: number | null,
+): Promise<void> {
+	await db.appSetting.upsert({
+		where: { id: SETTINGS_ID },
+		create: { id: SETTINGS_ID, costDailyUsdCap },
+		update: { costDailyUsdCap },
+	});
+}
+
 export function maskKey(key: string): string {
 	const trimmed = key.trim();
 	return trimmed.length > 4 ? `••••${trimmed.slice(-4)}` : "••••";

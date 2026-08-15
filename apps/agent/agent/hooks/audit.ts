@@ -2,6 +2,7 @@ import { db, Prisma } from "@crm/db";
 import { defineHook } from "eve/hooks";
 import { isTransportOnlyEvent } from "../lib/event-persistence";
 import { currentFocus } from "../lib/focus";
+import { assessDailyCostCap } from "../lib/daily-cost-cap";
 import { lockAgentRun } from "../lib/run-state";
 import { attribute, purposeOf } from "../lib/session-purpose";
 
@@ -108,10 +109,14 @@ async function persistRunEvent(
 	if (existing) return;
 
 	const sequence = run.nextEventSequence + 1;
-	const mayStart =
+	let mayStart =
 		type === "session.started" &&
 		isRootSession(ctx) &&
 		(run.status === "QUEUED" || run.status === "RUNNING");
+	if (mayStart && run.status === "QUEUED") {
+		const cost = await assessDailyCostCap();
+		if (cost.blocked) mayStart = false;
+	}
 	await tx.agentRun.update({
 		where: { id: run.id },
 		data: {

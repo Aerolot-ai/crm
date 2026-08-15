@@ -1302,6 +1302,8 @@ model AppSetting {
   trackingConfigHash       String?
   trackingPaused           Boolean  @default(false)
 
+  costDailyUsdCap Decimal? @db.Decimal(12, 2)
+
   updatedAt DateTime @updatedAt
 
   @@map("appSetting")
