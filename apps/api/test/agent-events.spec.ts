@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { db } from "@crm/db";
+import {
+	CRM_EVENT,
+	InvalidCrmEventEnvelope,
+	parseCrmEventEnvelope,
+} from "@crm/db/crm-events";
 import { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { ConversionService } from "../src/currency/conversion.service";
@@ -84,26 +89,27 @@ describe("CRM agent events", () => {
 			});
 		});
 
-		expect(
-			await db.agentTask.findFirstOrThrow({
-				where: { contactId, kind: "agent-event" },
-				select: {
-					contactId: true,
-					companyId: true,
-					dealId: true,
-					payload: true,
-				},
-			}),
-		).toEqual({
+		const row = await db.agentTask.findFirstOrThrow({
+			where: { contactId, kind: "agent-event" },
+			select: {
+				contactId: true,
+				companyId: true,
+				dealId: true,
+				payload: true,
+			},
+		});
+		expect(row).toMatchObject({
 			contactId,
 			companyId: null,
 			dealId: null,
-			payload: {
-				type: "contact.created",
-				record: { kind: "contact", id: contactId },
-				occurredAt: occurredAt.toISOString(),
-				data: { email: "person@example.test" },
-			},
+		});
+		expect(parseCrmEventEnvelope(row.payload)).toMatchObject({
+			type: "contact.created",
+			record: { kind: "contact", id: contactId },
+			occurredAt: occurredAt.toISOString(),
+			producer: CRM_EVENT.producer,
+			schemaVersion: CRM_EVENT.schemaVersion,
+			data: { email: "person@example.test" },
 		});
 	});
 
@@ -137,27 +143,67 @@ describe("CRM agent events", () => {
 		});
 
 		expect(tasks).toHaveLength(2);
-		expect(tasks.find((task) => task.reason === "deal.created")).toEqual({
-			dealId,
-			reason: "deal.created",
-			payload: {
-				type: "deal.created",
-				record: { kind: "deal", id: dealId },
-				occurredAt: createdAt.toISOString(),
-				data: { companyId, stage: "DEMO_BOOKED" },
-			},
-			finishedAt: null,
+		const created = tasks.find((task) => task.reason === "deal.created");
+		const closed = tasks.find((task) => task.reason === "deal.closed");
+		expect(created?.dealId).toBe(dealId);
+		expect(created?.finishedAt).toBeNull();
+		expect(parseCrmEventEnvelope(created?.payload)).toMatchObject({
+			type: "deal.created",
+			record: { kind: "deal", id: dealId },
+			occurredAt: createdAt.toISOString(),
+			data: { companyId, stage: "DEMO_BOOKED" },
 		});
-		expect(tasks.find((task) => task.reason === "deal.closed")).toEqual({
-			dealId,
-			reason: "deal.closed",
-			payload: {
+		expect(closed?.dealId).toBe(dealId);
+		expect(closed?.finishedAt).toBeNull();
+		expect(parseCrmEventEnvelope(closed?.payload)).toMatchObject({
+			type: "deal.closed",
+			record: { kind: "deal", id: dealId },
+			occurredAt: closedAt.toISOString(),
+			data: { companyId, from: "NEGOTIATION", to: "CLOSED_WON" },
+		});
+	});
+
+	it("fails the task when the envelope cannot be written", async () => {
+		let error: Error | null = null;
+		try {
+			await service.withCrmEvents(async (_tx, emit) => {
+				await emit({
+					type: "deal.closed",
+					record: { kind: "deal", id: dealId },
+					occurredAt: new Date(Number.NaN),
+					data: {},
+				});
+			});
+		} catch (caught) {
+			error = caught as Error;
+		}
+		expect(error).toBeInstanceOf(InvalidCrmEventEnvelope);
+	});
+
+	it("writes one deal.closed task for the same natural key", async () => {
+		const occurredAt = new Date("2026-08-10T12:00:00.000Z");
+		const closedDealId = `event-closed-once-${suffix}`;
+		await service.withCrmEvents(async (_tx, emit) => {
+			await emit({
 				type: "deal.closed",
-				record: { kind: "deal", id: dealId },
-				occurredAt: closedAt.toISOString(),
-				data: { companyId, from: "NEGOTIATION", to: "CLOSED_WON" },
-			},
-			finishedAt: null,
+				record: { kind: "deal", id: closedDealId },
+				occurredAt,
+				data: { to: "CLOSED_WON" },
+			});
+			await emit({
+				type: "deal.closed",
+				record: { kind: "deal", id: closedDealId },
+				occurredAt,
+				data: { to: "CLOSED_WON" },
+			});
+		});
+		expect(
+			await db.agentTask.count({
+				where: { dealId: closedDealId, kind: "agent-event" },
+			}),
+		).toBe(1);
+		await db.agentTask.deleteMany({
+			where: { dealId: closedDealId, kind: "agent-event" },
 		});
 	});
 
