@@ -230,9 +230,12 @@ describe("durable custom-agent runtime", () => {
 			companyId: null,
 			dealId: `event-deal-${suffix}`,
 			payload: {
+				id: `evt-${suffix}`,
 				type: "deal.closed",
 				record: { kind: "deal", id: `event-deal-${suffix}` },
 				occurredAt,
+				producer: "crm.api",
+				schemaVersion: 1,
 				data: { from: "NEGOTIATION", to: "CLOSED_WON" },
 			},
 		};
@@ -362,6 +365,18 @@ describe("durable custom-agent runtime", () => {
 			where: { id: agentId },
 			data: { currentVersionId: versionId },
 		});
+	});
+
+	it("fails closed when the queued event envelope is invalid", async () => {
+		await expect(
+			queueEventAgentRuns({
+				id: `event-task-bad-${suffix}`,
+				contactId: null,
+				companyId: null,
+				dealId: `event-deal-${suffix}`,
+				payload: { type: "deal.closed" },
+			}),
+		).rejects.toThrow("The CRM event envelope is invalid");
 	});
 
 	it("advances a due trigger only when its run is committed", async () => {

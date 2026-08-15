@@ -158,9 +158,12 @@ async function main() {
 				kind: "agent-event",
 				reason: "deal.created",
 				payload: {
+					id: crypto.randomUUID(),
 					type: "deal.created",
 					record: { kind: "deal", id: deal.id },
 					occurredAt: new Date().toISOString(),
+					producer: "crm.api",
+					schemaVersion: 1,
 					data: { companyId: deal.companyId, stage: "DEMO_BOOKED" },
 				},
 				priority: PRIORITY.event,

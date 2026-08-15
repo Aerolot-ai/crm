@@ -140,6 +140,10 @@ prompt, action body, Slack text, or email draft.
 | `team_output_tokens` | Sum of `AgentRun.outputTokens` |
 | `team_cost_usd` | Sum of `AgentRun.costUsd` (two decimal places) |
 
+Fleet `agents.observability` also reports UTC-day spend against
+`AppSetting.costDailyUsdCap`: `dailyCostUsd`, `dailyCapUsd`, `dailyCostRatio`,
+`dailyCostWarn` (80%), `dailyCostBlocked` (100%). Numbers only. No evidence text.
+
 In-product fleet health for the same aggregates lives on `agents.observability` (tRPC) and the
 team agents index. Per-run cost, tokens, and session event counts render in the run history
 drawer. Neither surface sends free text about a named person.

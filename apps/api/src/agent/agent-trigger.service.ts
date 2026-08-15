@@ -1,6 +1,13 @@
 import { type Db, type FieldEntity, Prisma } from "@crm/db";
 import { PRIORITY } from "@crm/db/agent-tasks";
-import { CRM_EVENT_CATALOG, type CrmEventType } from "@crm/db/crm-events";
+import {
+	CRM_EVENT,
+	CRM_EVENT_CATALOG,
+	type CrmEventType,
+	crmEventIdempotencyKey,
+	isIdempotentCrmEvent,
+	parseCrmEventEnvelope,
+} from "@crm/db/crm-events";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -168,8 +175,7 @@ export class AgentTriggerService {
 		const queued: CrmEventInput[] = [];
 		const result = await this.db.$transaction((tx) =>
 			work(tx, async (input) => {
-				await this.createEventTask(tx, input);
-				queued.push(input);
+				if (await this.createEventTask(tx, input)) queued.push(input);
 			}),
 		);
 
@@ -466,28 +472,52 @@ export class AgentTriggerService {
 	private async createEventTask(
 		tx: Prisma.TransactionClient,
 		input: CrmEventInput,
-	): Promise<void> {
+	): Promise<boolean> {
+		const occurredAt = Number.isNaN(input.occurredAt.getTime())
+			? ""
+			: input.occurredAt.toISOString();
+		const envelope = parseCrmEventEnvelope({
+			id: crypto.randomUUID(),
+			type: input.type,
+			occurredAt,
+			record: input.record,
+			producer: CRM_EVENT.producer,
+			schemaVersion: CRM_EVENT.schemaVersion,
+			data: input.data,
+		});
 		const recordIds = {
-			contactId: input.record.kind === "contact" ? input.record.id : null,
-			companyId: input.record.kind === "company" ? input.record.id : null,
-			dealId: input.record.kind === "deal" ? input.record.id : null,
+			contactId: envelope.record.kind === "contact" ? envelope.record.id : null,
+			companyId: envelope.record.kind === "company" ? envelope.record.id : null,
+			dealId: envelope.record.kind === "deal" ? envelope.record.id : null,
 		};
+		if (isIdempotentCrmEvent(envelope.type)) {
+			await lockIdempotencyKey(tx, crmEventIdempotencyKey(envelope));
+			const existing = await tx.agentTask.findFirst({
+				where: {
+					kind: "agent-event",
+					reason: envelope.type,
+					dealId: envelope.record.id,
+					payload: {
+						path: ["occurredAt"],
+						equals: envelope.occurredAt,
+					},
+				},
+				select: { id: true },
+			});
+			if (existing) return false;
+		}
 		await tx.agentTask.create({
 			data: {
 				...recordIds,
 				kind: "agent-event",
-				reason: input.type,
-				payload: {
-					type: input.type,
-					record: input.record,
-					occurredAt: input.occurredAt.toISOString(),
-					data: input.data,
-				},
+				reason: envelope.type,
+				payload: envelope,
 				priority: PRIORITY.event,
 				budget: 1,
 				dueAt: new Date(),
 			},
 		});
+		return true;
 	}
 
 	canReachAgent(): boolean {

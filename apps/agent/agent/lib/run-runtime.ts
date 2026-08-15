@@ -6,6 +6,7 @@ import { readCompanyHistory, readDealHistory } from "./accounts";
 import {
 	AGENT_ACTION_EXECUTORS,
 	AGENT_ACTION_TYPES,
+	assertUnattendedActionAllowed,
 	isAgentActionType,
 } from "./agent-actions";
 import { parseAgentManifest } from "./agent-manifest";
@@ -448,6 +449,15 @@ async function claimRunAction(
 		"idempotencyKey" | "requestHash"
 	>,
 ): Promise<RunActionClaim> {
+	if (isAgentActionType(data.type)) {
+		const run = await db.agentRun.findUnique({
+			where: { id: data.runId },
+			select: { triggerType: true },
+		});
+		if (!run) throw new Error("This agent run is unavailable.");
+		assertUnattendedActionAllowed(data.type, run.triggerType);
+	}
+
 	const action =
 		existing ??
 		(await db.$transaction(async (tx) => {

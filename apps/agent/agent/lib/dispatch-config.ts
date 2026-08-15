@@ -32,6 +32,10 @@ export const DISPATCH = {
 		leaseMs: 10 * MINUTE_MS,
 	},
 
+	cost: {
+		errorCode: "COST_DAILY_CAP",
+	},
+
 	sweep: {
 		timeoutMs: 4 * MINUTE_MS,
 		staleQueueMs: 5 * MINUTE_MS,
