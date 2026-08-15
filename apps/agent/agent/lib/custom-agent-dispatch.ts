@@ -1,6 +1,11 @@
 import { db, Prisma } from "@crm/db";
-import { CRM_EVENT_CATALOG, isCrmEventType } from "@crm/db/crm-events";
+import {
+	CRM_EVENT_CATALOG,
+	CRM_EVENT_TYPES,
+	parseCrmEventEnvelope,
+} from "@crm/db/crm-events";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
+import { z } from "zod";
 import type { SendFn } from "eve/channels";
 import { DISPATCH } from "./dispatch-config";
 import { DEPENDENCY_UNAVAILABLE, runDependencyFailure } from "./run-preflight";
@@ -10,6 +15,8 @@ import {
 	runTerminalEventId,
 } from "./run-state";
 import type { LeasedTask } from "./tasks";
+
+const eventTriggerConfig = z.object({ event: z.enum(CRM_EVENT_TYPES) });
 
 const BUILDER_BATCH = DISPATCH.builder.batch;
 const RUN_BATCH = DISPATCH.run.batch;
@@ -271,12 +278,11 @@ export async function queueEventAgentRuns(
 		"id" | "contactId" | "companyId" | "dealId" | "payload"
 	>,
 ): Promise<number> {
-	const payload = recordOf(task.payload);
-	const eventType = payload.type;
-	const record = recordOf(payload.record);
-	const recordKind = textOf(record.kind);
-	const recordId = textOf(record.id);
-	const occurredAt = textOf(payload.occurredAt);
+	const envelope = parseCrmEventEnvelope(task.payload);
+	const eventType = envelope.type;
+	const recordKind = envelope.record.kind;
+	const recordId = envelope.record.id;
+	const occurredAt = envelope.occurredAt;
 	const occurredAtDate = new Date(occurredAt);
 	const taskRecordId =
 		recordKind === "contact"
@@ -287,11 +293,8 @@ export async function queueEventAgentRuns(
 					? task.dealId
 					: null;
 	if (
-		!isCrmEventType(eventType) ||
 		CRM_EVENT_CATALOG[eventType].recordKind !== recordKind ||
-		!recordId ||
 		taskRecordId !== recordId ||
-		!occurredAt ||
 		Number.isNaN(occurredAtDate.getTime())
 	) {
 		throw new Error("The queued agent event is invalid.");
@@ -314,7 +317,9 @@ export async function queueEventAgentRuns(
 
 	let matched = 0;
 	for (const trigger of triggers) {
-		if (recordOf(trigger.config).event !== eventType) continue;
+		const triggerEvent = eventTriggerConfig.safeParse(trigger.config);
+		if (!triggerEvent.success || triggerEvent.data.event !== eventType)
+			continue;
 		const idempotencyKey = `event:${task.id}:trigger:${trigger.id}`;
 
 		const queued = await db.$transaction(async (tx) => {
@@ -343,7 +348,7 @@ export async function queueEventAgentRuns(
 						event: {
 							type: eventType,
 							occurredAt,
-							data: recordOf(payload.data),
+							data: envelope.data,
 						},
 						record: { kind: recordKind, id: recordId },
 					} as Prisma.InputJsonValue,
