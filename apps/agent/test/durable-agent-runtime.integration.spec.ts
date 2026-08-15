@@ -13,6 +13,11 @@ import {
 	queueEventAgentRuns,
 } from "../agent/lib/custom-agent-dispatch";
 import {
+	DEFAULT_AUTONOMY_POLICY,
+	FAIL_CLOSED_AUTONOMY_POLICY,
+	writeAutonomyPolicy,
+} from "../agent/lib/autonomy-policy";
+import {
 	createRunActivity,
 	finishRun,
 	stageRunResult,
@@ -27,6 +32,7 @@ let companyId = "";
 let otherCompanyId = "";
 let triggerId = "";
 const builderConversationIds: string[] = [];
+const extraAgentIds: string[] = [];
 
 beforeAll(async () => {
 	await db.user.create({
@@ -128,9 +134,11 @@ beforeAll(async () => {
 		select: { id: true },
 	});
 	triggerId = trigger.id;
+	await writeAutonomyPolicy(db, DEFAULT_AUTONOMY_POLICY);
 });
 
 afterEach(async () => {
+	await writeAutonomyPolicy(db, DEFAULT_AUTONOMY_POLICY);
 	if (!agentId) return;
 	await db.agentRun.updateMany({
 		where: {
@@ -151,6 +159,25 @@ afterAll(async () => {
 		await db.agentConversation.deleteMany({
 			where: { id: { in: builderConversationIds } },
 		});
+	}
+	const leftover = await db.agentDefinition.findMany({
+		where: { createdById: userId, id: { not: agentId } },
+		select: { id: true },
+	});
+	for (const extraId of [
+		...new Set([...extraAgentIds.splice(0), ...leftover.map((row) => row.id)]),
+	]) {
+		await db.agentRunEvent.deleteMany({
+			where: { run: { agentId: extraId } },
+		});
+		await db.agentRun.deleteMany({ where: { agentId: extraId } });
+		await db.agentTrigger.deleteMany({ where: { agentId: extraId } });
+		await db.agentDefinition.updateMany({
+			where: { id: extraId },
+			data: { currentVersionId: null },
+		});
+		await db.agentVersion.deleteMany({ where: { agentId: extraId } });
+		await db.agentDefinition.deleteMany({ where: { id: extraId } });
 	}
 	if (agentId) {
 		await db.agentEvent.deleteMany({
@@ -846,6 +873,170 @@ describe("durable custom-agent runtime", () => {
 				where: { idempotencyKey: `${run.id}:unapproved-task` },
 			}),
 		).toBe(0);
+	});
+
+	it("does not move a queued run to RUNNING when autonomy.global is observe", async () => {
+		await writeAutonomyPolicy(db, {
+			...DEFAULT_AUTONOMY_POLICY,
+			"autonomy.global": "observe",
+		});
+		const run = await createRun("QUEUED", null);
+		const send = (async () => ({
+			id: `durable-session-${suffix}-observe`,
+		})) as unknown as SendFn;
+
+		let error: Error | null = null;
+		try {
+			await dispatchAgentRun(run.id, send);
+		} catch (caught) {
+			error = caught as Error;
+		}
+
+		expect(error?.message).toContain("kill switch");
+		expect(
+			await db.agentRun.findUniqueOrThrow({ where: { id: run.id } }),
+		).toMatchObject({ status: "QUEUED", sessionId: null });
+		expect(await pendingAgentRunIds()).not.toContain(run.id);
+	});
+
+	it("does not enqueue EVENT runs for a disabled specialist", async () => {
+		await writeAutonomyPolicy(db, {
+			...DEFAULT_AUTONOMY_POLICY,
+			"specialist.engage": "off",
+		});
+		const engage = await db.agentDefinition.create({
+			data: {
+				name: `Engage kill ${suffix}`,
+				status: "LIVE",
+				createdById: userId,
+			},
+			select: { id: true },
+		});
+		extraAgentIds.push(engage.id);
+		const version = await db.agentVersion.create({
+			data: {
+				agentId: engage.id,
+				number: 1,
+				status: "DEPLOYED",
+				instructions: "Recommend only.",
+				manifest: { lifecycleRole: "engage" },
+				modelId: "test/model",
+				sandboxPolicy: {},
+				createdById: userId,
+				approvedAt: new Date(),
+				deployedAt: new Date(),
+			},
+			select: { id: true },
+		});
+		await db.agentDefinition.update({
+			where: { id: engage.id },
+			data: { currentVersionId: version.id },
+		});
+		const trigger = await db.agentTrigger.create({
+			data: {
+				agentId: engage.id,
+				versionId: version.id,
+				type: "EVENT",
+				name: "When a contact is created",
+				config: { event: "contact.created" },
+				createdById: userId,
+				enabled: true,
+			},
+			select: { id: true },
+		});
+		const contactId = `engage-contact-${suffix}`;
+		const occurredAt = new Date().toISOString();
+		const queued = await queueEventAgentRuns({
+			id: `event-task-engage-${suffix}`,
+			contactId,
+			companyId: null,
+			dealId: null,
+			payload: {
+				type: "contact.created",
+				record: { kind: "contact", id: contactId },
+				occurredAt,
+				data: {},
+			},
+		});
+
+		expect(await db.agentRun.count({ where: { triggerId: trigger.id } })).toBe(
+			0,
+		);
+		void queued;
+	});
+
+	it("still enqueues Qualify contact.created when recommend mode is on", async () => {
+		await writeAutonomyPolicy(db, DEFAULT_AUTONOMY_POLICY);
+		const qualify = await db.agentDefinition.create({
+			data: {
+				name: `Qualify kill ${suffix}`,
+				status: "LIVE",
+				createdById: userId,
+			},
+			select: { id: true },
+		});
+		extraAgentIds.push(qualify.id);
+		const version = await db.agentVersion.create({
+			data: {
+				agentId: qualify.id,
+				number: 1,
+				status: "DEPLOYED",
+				instructions: "Qualify.",
+				manifest: { lifecycleRole: "qualify" },
+				modelId: "test/model",
+				sandboxPolicy: {},
+				createdById: userId,
+				approvedAt: new Date(),
+				deployedAt: new Date(),
+			},
+			select: { id: true },
+		});
+		await db.agentDefinition.update({
+			where: { id: qualify.id },
+			data: { currentVersionId: version.id },
+		});
+		const trigger = await db.agentTrigger.create({
+			data: {
+				agentId: qualify.id,
+				versionId: version.id,
+				type: "EVENT",
+				name: "When a contact is created",
+				config: { event: "contact.created" },
+				createdById: userId,
+				enabled: true,
+			},
+			select: { id: true },
+		});
+		const contactId = `qualify-contact-${suffix}`;
+		const occurredAt = new Date().toISOString();
+		const queued = await queueEventAgentRuns({
+			id: `event-task-qualify-${suffix}`,
+			contactId,
+			companyId: null,
+			dealId: null,
+			payload: {
+				type: "contact.created",
+				record: { kind: "contact", id: contactId },
+				occurredAt,
+				data: {},
+			},
+		});
+
+		expect(queued).toBeGreaterThanOrEqual(1);
+		expect(
+			await db.agentRun.findMany({
+				where: { triggerId: trigger.id },
+				select: { status: true, triggerType: true },
+			}),
+		).toEqual([{ status: "QUEUED", triggerType: "EVENT" }]);
+	});
+
+	it("fails closed to observe when the policy row is missing or invalid", async () => {
+		expect(
+			(
+				await import("../agent/lib/autonomy-policy")
+			).parseAutonomyPolicy({ "autonomy.global": "yes" }),
+		).toEqual(FAIL_CLOSED_AUTONOMY_POLICY);
 	});
 });
 
