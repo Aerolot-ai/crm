@@ -1287,6 +1287,8 @@ model AppSetting {
   trackingConfigHash       String?
   trackingPaused           Boolean  @default(false)
 
+  autonomyPolicy Json?
+
   updatedAt DateTime @updatedAt
 
   @@map("appSetting")

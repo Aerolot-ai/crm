@@ -316,6 +316,12 @@ delegation paths for custom agents.
   team. Scheduled runner sessions use task mode and therefore cannot pause for a
   per-action approval; the deployed permission and idempotent runtime checks are the
   boundary.
+- **Kill switches live on `AppSetting.autonomyPolicy`.** Dispatch reads them
+  before a new `AgentRun` is created and before a queued run becomes `RUNNING`.
+  Missing or invalid JSON fails closed to observe. Defaults: `autonomy.global`
+  `recommend`, specialists on, `external_sends` off, `crm_writes` on. Phase 0
+  leaves only Qualify EVENT `contact.created` enabled. Engage, Advance and Close
+  EVENT triggers stay off. Specialist definitions stay.
 - **Approved instructions are system context.** The runner resolves the pinned
   version instructions at `session.started`, then calls `inspect_run` for the manifest
   and current run state. Every runner tool also checks the `team-agent` purpose and

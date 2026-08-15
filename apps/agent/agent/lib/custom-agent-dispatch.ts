@@ -2,6 +2,11 @@ import { db, Prisma } from "@crm/db";
 import { CRM_EVENT_CATALOG, isCrmEventType } from "@crm/db/crm-events";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
 import type { SendFn } from "eve/channels";
+import {
+	canQueueAgentRun,
+	canStartAgentRun,
+	readAutonomyPolicy,
+} from "./autonomy-policy";
 import { DISPATCH } from "./dispatch-config";
 import { DEPENDENCY_UNAVAILABLE, runDependencyFailure } from "./run-preflight";
 import {
@@ -212,12 +217,15 @@ export async function queueDueAgentRuns(now = new Date()): Promise<number> {
 			versionId: true,
 			nextRunAt: true,
 			config: true,
+			version: { select: { manifest: true } },
 		},
 	});
 
+	const policy = await readAutonomyPolicy(db);
 	let queued = 0;
 	for (const trigger of triggers) {
 		if (!trigger.nextRunAt) continue;
+		if (!canQueueAgentRun(policy, trigger.version.manifest)) continue;
 		const scheduledAt = trigger.nextRunAt;
 		const intervalMinutes = intervalOf(trigger.config);
 		const nextRunAt = advance(scheduledAt, intervalMinutes, now);
@@ -309,12 +317,15 @@ export async function queueEventAgentRuns(
 			agentId: true,
 			versionId: true,
 			config: true,
+			version: { select: { manifest: true } },
 		},
 	});
 
+	const policy = await readAutonomyPolicy(db);
 	let matched = 0;
 	for (const trigger of triggers) {
 		if (recordOf(trigger.config).event !== eventType) continue;
+		if (!canQueueAgentRun(policy, trigger.version.manifest)) continue;
 		const idempotencyKey = `event:${task.id}:trigger:${trigger.id}`;
 
 		const queued = await db.$transaction(async (tx) => {
@@ -383,12 +394,19 @@ export async function pendingAgentRunIds(): Promise<string[]> {
 		},
 		orderBy: [{ createdAt: "asc" }, { id: "asc" }],
 		take: RUN_BATCH * 4,
-		select: { id: true, agentId: true, versionId: true },
+		select: {
+			id: true,
+			agentId: true,
+			versionId: true,
+			version: { select: { manifest: true } },
+		},
 	});
 
+	const policy = await readAutonomyPolicy(db);
 	const runnable: string[] = [];
 	const selectedAgents = new Set<string>();
 	for (const row of rows) {
+		if (!canStartAgentRun(policy, row.version.manifest)) continue;
 		if (selectedAgents.has(row.agentId)) continue;
 		const blocked = await runDependencyFailure(row.versionId);
 		if (blocked) {
@@ -444,11 +462,16 @@ export async function dispatchAgentRun(runId: string, send: SendFn) {
 			agent: {
 				select: { name: true, createdById: true, status: true },
 			},
-			version: { select: { modelId: true } },
+			version: { select: { modelId: true, manifest: true } },
 		},
 	});
 	if (run?.status !== "QUEUED" || run.agent.status !== "LIVE") {
 		throw new Error("Agent run was already claimed or is not live.");
+	}
+
+	const policy = await readAutonomyPolicy(db);
+	if (!canStartAgentRun(policy, run.version.manifest)) {
+		throw new Error("Agent run is blocked by the workspace kill switch.");
 	}
 
 	const claim = await db.$transaction(async (tx) => {
