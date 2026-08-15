@@ -248,22 +248,123 @@ describe("durable custom-agent runtime", () => {
 
 		const runs = await db.agentRun.findMany({
 			where: { triggerId: trigger.id },
-			select: { triggerType: true, status: true, input: true },
+			select: { triggerType: true, status: true, input: true, versionId: true },
 		});
-		expect(runs).toEqual([
-			{
-				triggerType: "EVENT",
-				status: "QUEUED",
-				input: {
-					event: {
-						type: "deal.closed",
-						occurredAt,
-						data: { from: "NEGOTIATION", to: "CLOSED_WON" },
-					},
-					record: { kind: "deal", id: `event-deal-${suffix}` },
+		expect(runs).toHaveLength(1);
+		expect(runs[0]).toMatchObject({
+			triggerType: "EVENT",
+			status: "QUEUED",
+			versionId,
+			input: {
+				event: {
+					type: "deal.closed",
+					occurredAt,
+					data: { from: "NEGOTIATION", to: "CLOSED_WON" },
+				},
+				record: { kind: "deal", id: `event-deal-${suffix}` },
+				policy: {
+					lifecycleRole: null,
+					agentVersionId: versionId,
+					actionAllowlist: ["crm.activity.create", "run.summary"],
+					triggerType: "EVENT",
+					sellerRulesVersion: "missing",
 				},
 			},
-		]);
+		});
+		const queuedPolicy = (
+			runs[0]?.input as { policy?: { autonomy?: unknown } } | null
+		)?.policy;
+		expect(queuedPolicy).toBeDefined();
+		expect(queuedPolicy).not.toHaveProperty("autonomy");
+	});
+
+	it("keeps the queued EVENT policy snapshot after the LIVE definition changes", async () => {
+		const trigger = await db.agentTrigger.create({
+			data: {
+				agentId,
+				versionId,
+				type: "EVENT",
+				name: "When a deal opens",
+				config: { event: "deal.opened" },
+				createdById: userId,
+				enabled: true,
+			},
+			select: { id: true },
+		});
+		const occurredAt = new Date().toISOString();
+		await queueEventAgentRuns({
+			id: `event-task-snapshot-${suffix}`,
+			contactId: null,
+			companyId: null,
+			dealId: `event-deal-snapshot-${suffix}`,
+			payload: {
+				type: "deal.opened",
+				record: { kind: "deal", id: `event-deal-snapshot-${suffix}` },
+				occurredAt,
+				data: {},
+			},
+		});
+
+		const next = await db.agentVersion.create({
+			data: {
+				agentId,
+				number: 2,
+				status: "DEPLOYED",
+				instructions: "Changed after queue.",
+				manifest: {
+					lifecycleRole: "qualify",
+					triggers: [
+						{
+							type: "EVENT",
+							name: "When a deal opens",
+							summary: "Qualify opened deals",
+							config: { event: "deal.opened" },
+						},
+					],
+					dataScope: {
+						mode: "WORKSPACE",
+						summary: "Workspace",
+						resources: [],
+					},
+					actions: [
+						{
+							type: "run.summary",
+							provider: "crm",
+							summary: "Summarize the run",
+						},
+					],
+				},
+				modelId: "test/model",
+				sandboxPolicy: {},
+				createdById: userId,
+				approvedAt: new Date(),
+				deployedAt: new Date(),
+			},
+			select: { id: true },
+		});
+		await db.agentDefinition.update({
+			where: { id: agentId },
+			data: { currentVersionId: next.id },
+		});
+
+		const run = await db.agentRun.findFirstOrThrow({
+			where: { triggerId: trigger.id },
+			select: { input: true, versionId: true },
+		});
+		expect(run.versionId).toBe(versionId);
+		expect(run.input).toMatchObject({
+			policy: {
+				lifecycleRole: null,
+				agentVersionId: versionId,
+				actionAllowlist: ["crm.activity.create", "run.summary"],
+				triggerType: "EVENT",
+				sellerRulesVersion: "missing",
+			},
+		});
+		await db.agentDefinition.update({
+			where: { id: agentId },
+			data: { currentVersionId: versionId },
+		});
 	});
 
 	it("fails closed when the queued event envelope is invalid", async () => {
