@@ -170,6 +170,10 @@ describe("agent observability fleet", () => {
 		expect(fleet.consumption.inputTokens).toBeGreaterThanOrEqual(10);
 		expect(fleet.consumption.outputTokens).toBeGreaterThanOrEqual(5);
 		expect(fleet.consumption.costUsd).toBeGreaterThanOrEqual(0.01);
+		expect(fleet.consumption.dailyCostUsd).toBeGreaterThanOrEqual(0.01);
+		expect(fleet.consumption.dailyCapUsd).toBeGreaterThan(0);
+		expect(typeof fleet.consumption.dailyCostWarn).toBe("boolean");
+		expect(typeof fleet.consumption.dailyCostBlocked).toBe("boolean");
 		expect(fleet.consumption.sessionsWithTrace).toBeGreaterThanOrEqual(1);
 		expect(fleet.agents.byLifecycleRole.qualify).toBeGreaterThanOrEqual(1);
 

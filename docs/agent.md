@@ -338,6 +338,12 @@ delegation paths for custom agents.
   version instructions at `session.started`, then calls `inspect_run` for the manifest
   and current run state. Every runner tool also checks the `team-agent` purpose and
   revalidates scope and action permission.
+- **Daily workspace cost cap is `AppSetting.costDailyUsdCap`.** Default is
+  `DEFAULT_COST_DAILY_USD_CAP` (`10000` USD). That number is an engineering
+  ceiling, not a customer price. Dispatch sums today's `AgentRun.costUsd` (UTC
+  day) before a run moves to `RUNNING`. At 80% the agent logs a warn and fleet
+  health sets `dailyCostWarn`. At 100% dispatch refuses `RUNNING` and fails the
+  run with `COST_DAILY_CAP`. Tests inject a tiny cap.
 - **Stopping a run is a row, not a signal.** `agents.cancelRun` settles the
   `AgentRun` to `CANCELLED` inside one transaction — terminal event, outstanding
   `AgentAction` rows, audit entry — and *then* pokes

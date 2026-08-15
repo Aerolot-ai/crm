@@ -2,6 +2,10 @@ import { db, Prisma } from "@crm/db";
 import { CRM_EVENT_CATALOG, isCrmEventType } from "@crm/db/crm-events";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
 import type { SendFn } from "eve/channels";
+import {
+	assessDailyCostCap,
+	COST_DAILY_CAP_CODE,
+} from "./daily-cost-cap";
 import { DISPATCH } from "./dispatch-config";
 import { DEPENDENCY_UNAVAILABLE, runDependencyFailure } from "./run-preflight";
 import {
@@ -449,6 +453,16 @@ export async function dispatchAgentRun(runId: string, send: SendFn) {
 	});
 	if (run?.status !== "QUEUED" || run.agent.status !== "LIVE") {
 		throw new Error("Agent run was already claimed or is not live.");
+	}
+
+	const cost = await assessDailyCostCap();
+	if (cost.blocked) {
+		await failRun(
+			run.id,
+			COST_DAILY_CAP_CODE,
+			"Daily workspace cost cap reached.",
+		);
+		throw new Error("Daily workspace cost cap reached.");
 	}
 
 	const claim = await db.$transaction(async (tx) => {

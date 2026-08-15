@@ -1,4 +1,8 @@
 import type { Db } from "@crm/db";
+import {
+	COST_DAILY_WARN_RATIO,
+	readCostDailyUsdCap,
+} from "@crm/db/settings";
 import { readLifecycleRole } from "@crm/validation";
 import { Injectable } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -19,7 +23,11 @@ export class AgentObservabilityService {
 	async fleet(userId: string) {
 		await this.access.assertMember(userId);
 
-		const since = new Date(Date.now() - WINDOW_HOURS * HOUR_MS);
+		const now = new Date();
+		const since = new Date(now.getTime() - WINDOW_HOURS * HOUR_MS);
+		const dayStart = new Date(
+			Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+		);
 
 		const [
 			statusRows,
@@ -29,6 +37,8 @@ export class AgentObservabilityService {
 			actionTypeRows,
 			actionStatusRows,
 			agents,
+			todayCost,
+			dailyCapUsd,
 		] = await Promise.all([
 			this.db.agentRun.groupBy({
 				by: ["status"],
@@ -87,6 +97,11 @@ export class AgentObservabilityService {
 					_count: { select: { runs: true } },
 				},
 			}),
+			this.db.agentRun.aggregate({
+				_sum: { costUsd: true },
+				where: { createdAt: { gte: dayStart } },
+			}),
+			readCostDailyUsdCap(this.db),
 		]);
 
 		const runsByRole: Record<string, number> = {};
@@ -158,6 +173,18 @@ export class AgentObservabilityService {
 				inputTokens,
 				outputTokens,
 				costUsd: round(costUsd),
+				dailyCostUsd: round(Number(todayCost._sum.costUsd ?? 0)),
+				dailyCapUsd: dailyCapUsd,
+				dailyCostRatio: dailyCapUsd > 0
+					? Number(todayCost._sum.costUsd ?? 0) / dailyCapUsd
+					: 0,
+				dailyCostWarn:
+					dailyCapUsd > 0 &&
+					Number(todayCost._sum.costUsd ?? 0) / dailyCapUsd >=
+						COST_DAILY_WARN_RATIO,
+				dailyCostBlocked:
+					dailyCapUsd > 0 &&
+					Number(todayCost._sum.costUsd ?? 0) >= dailyCapUsd,
 				runs: runs.length,
 				sessionsWithTrace,
 				runEvents: toolEvents,
