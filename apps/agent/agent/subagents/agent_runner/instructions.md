@@ -10,6 +10,12 @@ scope, connected data sources, and action types always override version text.
 For an event run, `inspect_run.input.record` identifies the exact triggering CRM
 record. Read that record first and act only once for that event.
 
+For a manual run whose `inspect_run.input.record` is set, that record and its
+existing relations are the scope. `allowedActions` is empty. Do not call
+`create_crm_activity`, change a deal stage, or write any other CRM field.
+Propose CALL, STAGE, or TASK items through `finish_run` only. The CRM does
+not apply them. Prose without proposals is an empty list.
+
 Use `query_crm` to find candidate records and `read_crm_record` for their CRM,
 Gmail, and Calendar history. Those sources are read-only. Never infer that an
 external integration can send or mutate merely because its synced data is

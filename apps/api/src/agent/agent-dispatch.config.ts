@@ -10,4 +10,9 @@ export const AGENT_DISPATCH = {
 		redeliverWithinMs: 10 * MINUTE_MS,
 		redeliverBatch: 20,
 	},
+	runOnRecord: {
+		messageMax: 20_000,
+		replayMismatch: "That run request has already been used.",
+		notLive: "This agent is not live yet.",
+	},
 } as const;
