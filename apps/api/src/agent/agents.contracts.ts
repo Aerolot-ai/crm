@@ -1,5 +1,6 @@
 import { schemas } from "@crm/validation";
 import { z } from "zod";
+import { AGENT_DISPATCH } from "./agent-dispatch.config";
 
 export const agentManifest = schemas.agents.capabilities.loose();
 
@@ -21,6 +22,36 @@ export const agentRunNowInput = agentIdInput.extend({
 });
 
 export type AgentRunNowInput = z.infer<typeof agentRunNowInput>;
+
+const runOnRecordShape = {
+	contactId: z.string().trim().min(1).optional(),
+	companyId: z.string().trim().min(1).optional(),
+	dealId: z.string().trim().min(1).optional(),
+};
+
+const hasExactlyOneRecord = (input: {
+	contactId?: string;
+	companyId?: string;
+	dealId?: string;
+}) =>
+	[input.contactId, input.companyId, input.dealId].filter(Boolean).length === 1;
+
+export const agentRunOnRecordInput = z
+	.object({
+		agentId: z.string().min(1),
+		clientRequestId: z.uuid(),
+		...runOnRecordShape,
+		message: z
+			.string()
+			.trim()
+			.max(AGENT_DISPATCH.runOnRecord.messageMax)
+			.optional(),
+	})
+	.refine(hasExactlyOneRecord, {
+		message: "Choose exactly one contact, company or deal.",
+	});
+
+export type AgentRunOnRecordInput = z.infer<typeof agentRunOnRecordInput>;
 
 export const agentRetryRunInput = agentIdInput.extend({
 	runId: z.string().min(1),

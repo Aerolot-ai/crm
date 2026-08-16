@@ -21,6 +21,7 @@ import {
 	agentRetryRunInput,
 	agentReviseInput,
 	agentRunNowInput,
+	agentRunOnRecordInput,
 	agentSaveFileInput,
 	agentUpdateInput,
 } from "./agents.contracts";
@@ -136,6 +137,14 @@ export class AgentsRouter {
 		@Input() input: z.infer<typeof agentRunNowInput>,
 	) {
 		return this.runs.runNow(input, ctx.user.id);
+	}
+
+	@Mutation({ input: agentRunOnRecordInput })
+	async runOnRecord(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof agentRunOnRecordInput>,
+	) {
+		return this.runs.runOnRecord(input, ctx.user.id);
 	}
 
 	@Mutation({ input: agentRetryRunInput })

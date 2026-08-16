@@ -1,3 +1,4 @@
+import type {} from "@ai-sdk/provider";
 import { db } from "@crm/db";
 import { defineAgent, defineDynamic } from "eve";
 import { z } from "zod";

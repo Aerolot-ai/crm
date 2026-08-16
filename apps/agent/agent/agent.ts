@@ -1,14 +1,12 @@
 import "@crm/env/load";
 
+import type {} from "@ai-sdk/provider";
 import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 import { onTelemetryProblem, syncVersion } from "@crm/telemetry";
 import { defineAgent, defineDynamic } from "eve";
 import { logCapabilities } from "./lib/capabilities";
 import { selectedModel } from "./lib/model";
-import {
-	createCrmLanguageModel,
-	defaultCrmModel,
-} from "./lib/provider-model";
+import { createCrmLanguageModel, defaultCrmModel } from "./lib/provider-model";
 
 void logCapabilities();
 

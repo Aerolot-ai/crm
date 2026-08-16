@@ -17,7 +17,13 @@ import type {
 	AgentCancelRunInput,
 	AgentRetryRunInput,
 	AgentRunNowInput,
+	AgentRunOnRecordInput,
 } from "./agents.contracts";
+
+type RunRecord = {
+	kind: "contact" | "company" | "deal";
+	id: string;
+};
 
 const CANCELLABLE_STATUSES: readonly AgentRunStatus[] = [
 	"QUEUED",
@@ -47,6 +53,7 @@ export class AgentRunsService {
 				status: true,
 				triggerType: true,
 				summary: true,
+				result: true,
 				modelId: true,
 				inputTokens: true,
 				outputTokens: true,
@@ -221,6 +228,108 @@ export class AgentRunsService {
 			await tx.agentAuditEvent.create({
 				data: {
 					agentId: input.id,
+					versionId: agent.currentVersionId,
+					actorUserId: userId,
+					actorType: "USER",
+					actorId: userId,
+					type: "run.requested",
+					summary: "Requested a manual run",
+					requestId: input.clientRequestId,
+				},
+			});
+
+			return created;
+		});
+
+		this.trigger.deployedAgentRunQueued();
+		return run;
+	}
+
+	async runOnRecord(input: AgentRunOnRecordInput, userId: string) {
+		await this.access.assertMember(userId);
+		const record = recordFromIds(input);
+		const existing = await this.db.agentRun.findUnique({
+			where: { idempotencyKey: input.clientRequestId },
+			select: { id: true, agentId: true, input: true },
+		});
+
+		if (existing) {
+			this.assertReplayMatchesRecord(existing, input.agentId, record);
+			this.trigger.deployedAgentRunQueued();
+			return { id: existing.id };
+		}
+
+		const run = await this.db.$transaction(async (tx) => {
+			await lockIdempotencyKey(tx, input.clientRequestId);
+			const replay = await tx.agentRun.findUnique({
+				where: { idempotencyKey: input.clientRequestId },
+				select: { id: true, agentId: true, input: true },
+			});
+			if (replay) {
+				this.assertReplayMatchesRecord(replay, input.agentId, record);
+				return { id: replay.id };
+			}
+
+			const [agent] = await tx.$queryRaw<
+				Array<{
+					id: string;
+					status: string;
+					currentVersionId: string | null;
+				}>
+			>`
+					SELECT id, status, "currentVersionId"
+					FROM "agentDefinition"
+					WHERE id = ${input.agentId}
+					FOR UPDATE
+				`;
+
+			if (!agent || agent.status === "DELETED") {
+				throw new NotFoundException(`No agent with id ${input.agentId}.`);
+			}
+
+			if (agent.status !== "LIVE" || !agent.currentVersionId) {
+				throw new BadRequestException(AGENT_DISPATCH.runOnRecord.notLive);
+			}
+
+			await this.assertReadableRecord(tx, record);
+
+			const active = await tx.agentRun.findFirst({
+				where: {
+					agentId: input.agentId,
+					status: { in: [...CANCELLABLE_STATUSES] },
+				},
+				select: { id: true },
+			});
+			if (active) {
+				throw new ConflictException(
+					"This agent already has an active run. Stop it or wait for it to finish.",
+				);
+			}
+
+			const runInput = {
+				record,
+				...(input.message ? { message: input.message } : {}),
+			};
+
+			const created = await tx.agentRun.create({
+				data: {
+					agentId: input.agentId,
+					versionId: agent.currentVersionId,
+					initiatedById: userId,
+					triggerType: "MANUAL",
+					input: runInput,
+					idempotencyKey: input.clientRequestId,
+					correlationId: randomUUID(),
+					events: {
+						create: { sequence: 0, type: "run.queued", data: {} },
+					},
+				},
+				select: { id: true },
+			});
+
+			await tx.agentAuditEvent.create({
+				data: {
+					agentId: input.agentId,
 					versionId: agent.currentVersionId,
 					actorUserId: userId,
 					actorType: "USER",
@@ -439,7 +548,81 @@ export class AgentRunsService {
 		requestedAgentId: string,
 	) {
 		if (existingAgentId !== requestedAgentId) {
-			throw new BadRequestException("That run request has already been used.");
+			throw new BadRequestException(AGENT_DISPATCH.runOnRecord.replayMismatch);
 		}
 	}
+
+	private assertReplayMatchesRecord(
+		existing: { agentId: string; input: Prisma.JsonValue | null },
+		requestedAgentId: string,
+		record: RunRecord,
+	) {
+		this.assertReplayMatches(existing.agentId, requestedAgentId);
+		const stored = recordFromRunInput(existing.input);
+		if (!stored || stored.kind !== record.kind || stored.id !== record.id) {
+			throw new BadRequestException(AGENT_DISPATCH.runOnRecord.replayMismatch);
+		}
+	}
+
+	private async assertReadableRecord(
+		tx: Prisma.TransactionClient,
+		record: RunRecord,
+	) {
+		if (record.kind === "contact") {
+			const contact = await tx.contact.findUnique({
+				where: { id: record.id },
+				select: { id: true },
+			});
+			if (!contact) {
+				throw new NotFoundException(`No contact with id ${record.id}.`);
+			}
+			return;
+		}
+		if (record.kind === "company") {
+			const company = await tx.company.findUnique({
+				where: { id: record.id },
+				select: { id: true },
+			});
+			if (!company) {
+				throw new NotFoundException(`No company with id ${record.id}.`);
+			}
+			return;
+		}
+		const deal = await tx.deal.findUnique({
+			where: { id: record.id },
+			select: { id: true },
+		});
+		if (!deal) {
+			throw new NotFoundException(`No deal with id ${record.id}.`);
+		}
+	}
+}
+
+function recordFromIds(input: {
+	contactId?: string;
+	companyId?: string;
+	dealId?: string;
+}): RunRecord {
+	if (input.contactId) return { kind: "contact", id: input.contactId };
+	if (input.companyId) return { kind: "company", id: input.companyId };
+	if (input.dealId) return { kind: "deal", id: input.dealId };
+	throw new BadRequestException("Choose exactly one contact, company or deal.");
+}
+
+function recordFromRunInput(input: Prisma.JsonValue | null): RunRecord | null {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+	const record = (input as { record?: unknown }).record;
+	if (!record || typeof record !== "object" || Array.isArray(record)) {
+		return null;
+	}
+	const kind = (record as { kind?: unknown }).kind;
+	const id = (record as { id?: unknown }).id;
+	if (
+		(kind === "contact" || kind === "company" || kind === "deal") &&
+		typeof id === "string" &&
+		id.length > 0
+	) {
+		return { kind, id };
+	}
+	return null;
 }

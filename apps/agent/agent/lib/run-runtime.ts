@@ -14,6 +14,13 @@ import { readCrmHistory } from "./crm";
 import { DISPATCH } from "./dispatch-config";
 import { searchCrm } from "./lookup";
 import {
+	isProposeOnlyRun,
+	keepScopedProposals,
+	loadRecordScopeResources,
+	parseRunRecord,
+	proposalsFromResult,
+} from "./run-proposals";
+import {
 	type LockedAgentRun,
 	lockAgentRun,
 	runTerminalEventId,
@@ -102,11 +109,22 @@ export async function runContext(runId: string) {
 	}
 
 	const dataScope = manifestDataScope(run.version.manifest);
+	const proposeOnly = isProposeOnlyRun(run.triggerType, run.input);
+	const record = parseRunRecord(run.input);
+	const recordResources =
+		proposeOnly && record ? await loadRecordScopeResources(record) : [];
+	const allowedResources = proposeOnly
+		? [
+				...dataScope.resources.filter((row) => row.kind === "integration"),
+				...recordResources,
+			]
+		: dataScope.resources;
 	return {
 		...run,
-		recordScope: dataScope.mode,
-		allowedResources: dataScope.resources,
-		allowedActions: manifestActions(run.version.manifest),
+		recordScope: proposeOnly ? "SELECTED" : dataScope.mode,
+		allowedResources,
+		allowedActions: proposeOnly ? [] : manifestActions(run.version.manifest),
+		proposeOnly,
 		now: new Date().toISOString(),
 	};
 }
@@ -196,11 +214,14 @@ export async function createRunActivity(
 			status: true,
 			agentId: true,
 			initiatedById: true,
+			triggerType: true,
+			input: true,
 			agent: { select: { createdById: true } },
 			version: { select: { manifest: true } },
 		},
 	});
 	if (!run) throw new Error("This agent run is unavailable.");
+	assertCrmWriteAllowed(run.triggerType, run.input);
 
 	assertActivityAllowed(run.version.manifest, input.type);
 	const dataScope = manifestDataScope(run.version.manifest);
@@ -336,10 +357,13 @@ export async function postRunSlackMessage(
 			id: true,
 			status: true,
 			agentId: true,
+			triggerType: true,
+			input: true,
 			version: { select: { manifest: true } },
 		},
 	});
 	if (!run) throw new Error("This agent run is unavailable.");
+	assertCrmWriteAllowed(run.triggerType, run.input);
 
 	const destination = approvedSlackDestination(run.version.manifest);
 	const text = input.text.trim();
@@ -695,6 +719,7 @@ export async function stageRunResult(
 	input: {
 		summary: string;
 		result?: Record<string, unknown> | null;
+		proposals?: unknown;
 		noActionNeeded?: { reason: string } | null;
 	},
 ) {
@@ -702,6 +727,25 @@ export async function stageRunResult(
 		const run = await lockAgentRun(tx, runId);
 		if (run.status !== "RUNNING") {
 			throw new Error(`This agent run already ended with ${run.status}.`);
+		}
+		const stored = await tx.agentRun.findUniqueOrThrow({
+			where: { id: runId },
+			select: { triggerType: true, input: true },
+		});
+		if (isProposeOnlyRun(stored.triggerType, stored.input)) {
+			const result = await proposeOnlyResult(
+				stored.input,
+				input.result,
+				input.proposals,
+			);
+			await tx.agentRun.update({
+				where: { id: runId },
+				data: {
+					summary: input.summary,
+					result: result as Prisma.InputJsonValue,
+				},
+			});
+			return { id: run.id, status: "RUNNING" as const };
 		}
 		if (input.noActionNeeded) {
 			const refusal = await noActionNeededRefusal(tx, run);
@@ -738,7 +782,11 @@ export function runReportedNoActionNeeded(result: unknown): boolean {
 
 export async function finishRun(
 	runId: string,
-	input: { summary: string; result?: Record<string, unknown> | null },
+	input: {
+		summary: string;
+		result?: Record<string, unknown> | null;
+		proposals?: unknown;
+	},
 ) {
 	return db.$transaction(async (tx) => {
 		const run = await lockAgentRun(tx, runId);
@@ -748,14 +796,43 @@ export async function finishRun(
 		if (run.status !== "RUNNING") {
 			throw new Error(`This agent run already ended with ${run.status}.`);
 		}
-		const noActionAccepted =
-			runReportedNoActionNeeded(input.result) &&
-			(await noActionNeededRefusal(tx, run)) === null;
-		const actionFailure = noActionAccepted
-			? null
-			: await requiredActionFailure(tx, run);
-		if (actionFailure) {
-			return failLockedRun(tx, run, actionFailure.code, actionFailure.message);
+		const stored = await tx.agentRun.findUniqueOrThrow({
+			where: { id: runId },
+			select: { triggerType: true, input: true },
+		});
+		const proposeOnly = isProposeOnlyRun(stored.triggerType, stored.input);
+		const result = proposeOnly
+			? await proposeOnlyResult(stored.input, input.result, input.proposals)
+			: (input.result ?? {});
+		if (
+			proposeOnly &&
+			"proposals" in result &&
+			Array.isArray(result.proposals) &&
+			result.proposals.length === 0
+		) {
+			return failLockedRun(
+				tx,
+				run,
+				DISPATCH.run.emptyProposalsCode,
+				DISPATCH.run.emptyProposalsMessage,
+				{ proposals: [] },
+			);
+		}
+		if (!proposeOnly) {
+			const noActionAccepted =
+				runReportedNoActionNeeded(input.result) &&
+				(await noActionNeededRefusal(tx, run)) === null;
+			const actionFailure = noActionAccepted
+				? null
+				: await requiredActionFailure(tx, run);
+			if (actionFailure) {
+				return failLockedRun(
+					tx,
+					run,
+					actionFailure.code,
+					actionFailure.message,
+				);
+			}
 		}
 
 		const sequence = run.nextEventSequence + 1;
@@ -765,7 +842,7 @@ export async function finishRun(
 			data: {
 				status: "SUCCEEDED",
 				summary: input.summary,
-				result: (input.result ?? {}) as Prisma.InputJsonValue,
+				result: result as Prisma.InputJsonValue,
 				finishedAt,
 				nextEventSequence: sequence,
 			},
@@ -892,6 +969,7 @@ async function failLockedRun(
 	run: LockedAgentRun,
 	code: string,
 	message: string,
+	result?: Prisma.InputJsonValue,
 ) {
 	const sequence = run.nextEventSequence + 1;
 	const finishedAt = new Date();
@@ -901,6 +979,7 @@ async function failLockedRun(
 			status: "FAILED",
 			errorCode: code,
 			errorMessage: message,
+			...(result === undefined ? {} : { result }),
 			finishedAt,
 			nextEventSequence: sequence,
 		},
@@ -1026,6 +1105,30 @@ export function approvedSlackDestination(manifest: unknown): {
 	}
 
 	return destination;
+}
+
+export function assertCrmWriteAllowed(
+	triggerType: AgentTriggerType,
+	input: unknown,
+): void {
+	if (isProposeOnlyRun(triggerType, input)) {
+		throw new Error(DISPATCH.run.writeForbidden);
+	}
+}
+
+async function proposeOnlyResult(
+	input: unknown,
+	result: unknown,
+	proposals?: unknown,
+): Promise<{ proposals: ReturnType<typeof keepScopedProposals> }> {
+	const record = parseRunRecord(input);
+	const resources = record ? await loadRecordScopeResources(record) : [];
+	return {
+		proposals: keepScopedProposals(
+			proposalsFromResult(result, proposals),
+			resources,
+		),
+	};
 }
 
 function assertResourceAllowed(

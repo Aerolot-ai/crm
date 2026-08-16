@@ -26,6 +26,14 @@ export const DISPATCH = {
 		actionLeaseMs: 5 * MINUTE_MS,
 		executionTimeoutMs: 20 * MINUTE_MS,
 		noActionTriggerTypes: ["EVENT", "SCHEDULE", "WEBHOOK"],
+		proposalMax: 20,
+		proposalBodyMax: 10_000,
+		proposalSubjectMax: 240,
+		proposalReasonMax: 2_000,
+		writeForbidden: "This run can only propose changes. It cannot write them.",
+		emptyProposalsCode: "NO_PROPOSALS",
+		emptyProposalsMessage:
+			"This run produced no CALL, STAGE, or TASK proposals.",
 	},
 
 	task: {

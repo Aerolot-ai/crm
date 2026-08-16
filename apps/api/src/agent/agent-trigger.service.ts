@@ -511,7 +511,7 @@ export class AgentTriggerService {
 				...recordIds,
 				kind: "agent-event",
 				reason: envelope.type,
-				payload: envelope,
+				payload: envelope as Prisma.InputJsonValue,
 				priority: PRIORITY.event,
 				budget: 1,
 				dueAt: new Date(),

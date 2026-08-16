@@ -5,6 +5,7 @@ import { workspaceSlug } from "@crm/db/workspace";
 import { AgentAccessService } from "../src/agent/agent-access.service";
 import { AgentRunsService } from "../src/agent/agent-runs.service";
 import { AgentTriggerService } from "../src/agent/agent-trigger.service";
+import { agentRunOnRecordInput } from "../src/agent/agents.contracts";
 
 const suffix = crypto.randomUUID();
 const userId = `agent-run-user-${suffix}`;
@@ -12,6 +13,9 @@ const outsiderId = `agent-run-outsider-${suffix}`;
 const memberId = `agent-run-member-${suffix}`;
 let agentId = "";
 let versionId = "";
+let companyId = "";
+let contactId = "";
+let dealId = "";
 let pokeCount = 0;
 let cancelPokes: string[] = [];
 const trigger = {
@@ -81,6 +85,33 @@ beforeAll(async () => {
 		where: { id: agentId },
 		data: { currentVersionId: versionId },
 	});
+	const company = await db.company.create({
+		data: {
+			name: "Run on record company",
+			domain: `run-on-record-${suffix}.example.test`,
+		},
+		select: { id: true },
+	});
+	companyId = company.id;
+	const contact = await db.contact.create({
+		data: {
+			firstName: "Ada",
+			lastName: "Lovelace",
+			companyId,
+		},
+		select: { id: true },
+	});
+	contactId = contact.id;
+	const deal = await db.deal.create({
+		data: {
+			name: "Run on record deal",
+			companyId,
+			ownerId: userId,
+			stage: "DEMO_BOOKED",
+		},
+		select: { id: true },
+	});
+	dealId = deal.id;
 });
 
 afterAll(async () => {
@@ -114,6 +145,9 @@ afterAll(async () => {
 			where: { id: { in: agentIds } },
 		});
 	}
+	await db.deal.deleteMany({ where: { id: dealId } });
+	await db.contact.deleteMany({ where: { id: contactId } });
+	await db.company.deleteMany({ where: { id: companyId } });
 	await db.member.deleteMany({ where: { id: memberId } });
 	await db.user.deleteMany({ where: { id: { in: [userId, outsiderId] } } });
 });
@@ -606,5 +640,197 @@ describe("cancelling a run", () => {
 				process.env.AGENT_BRIDGE_SECRET = realSecret;
 			}
 		}
+	});
+});
+
+describe("agents.runOnRecord", () => {
+	it("requires exactly one contact, company or deal", () => {
+		const clientRequestId = crypto.randomUUID();
+		expect(
+			agentRunOnRecordInput.safeParse({
+				agentId,
+				clientRequestId,
+			}).success,
+		).toBe(false);
+		expect(
+			agentRunOnRecordInput.safeParse({
+				agentId,
+				clientRequestId,
+				contactId,
+				companyId,
+			}).success,
+		).toBe(false);
+		expect(
+			agentRunOnRecordInput.safeParse({
+				agentId,
+				clientRequestId,
+				contactId,
+				dealId,
+			}).success,
+		).toBe(false);
+		expect(
+			agentRunOnRecordInput.safeParse({
+				agentId,
+				clientRequestId,
+				contactId,
+			}).success,
+		).toBe(true);
+	});
+
+	it("rejects a record run while an agent is not live", async () => {
+		const beforePokeCount = pokeCount;
+		const draft = await db.agentDefinition.create({
+			data: {
+				name: "Draft record run guard",
+				status: "DRAFT",
+				createdById: userId,
+			},
+			select: { id: true },
+		});
+
+		let runError: unknown;
+		try {
+			await service.runOnRecord(
+				{
+					agentId: draft.id,
+					clientRequestId: crypto.randomUUID(),
+					contactId,
+				},
+				userId,
+			);
+		} catch (error) {
+			runError = error;
+		}
+		expect((runError as Error).message).toBe("This agent is not live yet.");
+		expect(pokeCount).toBe(beforePokeCount);
+	});
+
+	it("queues a manual run for one readable record and writes no CRM rows", async () => {
+		const beforeActivities = await db.activity.count({
+			where: { OR: [{ contactId }, { companyId }, { dealId }] },
+		});
+		const beforeStage = await db.deal.findUniqueOrThrow({
+			where: { id: dealId },
+			select: { stage: true },
+		});
+		const beforeConversations = await db.agentConversation.count({
+			where: { agentId },
+		});
+		const clientRequestId = crypto.randomUUID();
+
+		const { id: runId } = await service.runOnRecord(
+			{
+				agentId,
+				clientRequestId,
+				contactId,
+				message: "Recap the last call.",
+			},
+			userId,
+		);
+
+		expect(
+			await db.agentRun.findUniqueOrThrow({
+				where: { id: runId },
+				select: {
+					triggerType: true,
+					input: true,
+					sessionId: true,
+					initiatedById: true,
+				},
+			}),
+		).toEqual({
+			triggerType: "MANUAL",
+			sessionId: null,
+			initiatedById: userId,
+			input: {
+				record: { kind: "contact", id: contactId },
+				message: "Recap the last call.",
+			},
+		});
+		expect(
+			await db.activity.count({
+				where: { OR: [{ contactId }, { companyId }, { dealId }] },
+			}),
+		).toBe(beforeActivities);
+		expect(
+			await db.deal.findUniqueOrThrow({
+				where: { id: dealId },
+				select: { stage: true },
+			}),
+		).toEqual(beforeStage);
+		expect(await db.agentConversation.count({ where: { agentId } })).toBe(
+			beforeConversations,
+		);
+	});
+
+	it("replays the same client request only for the same agent and record", async () => {
+		const clientRequestId = crypto.randomUUID();
+		const first = await service.runOnRecord(
+			{ agentId, clientRequestId, companyId },
+			userId,
+		);
+		const replay = await service.runOnRecord(
+			{ agentId, clientRequestId, companyId },
+			userId,
+		);
+		expect(replay.id).toBe(first.id);
+
+		let mismatch: Error | null = null;
+		try {
+			await service.runOnRecord(
+				{ agentId, clientRequestId, contactId },
+				userId,
+			);
+		} catch (error) {
+			mismatch = error as Error;
+		}
+		expect(mismatch?.message).toBe("That run request has already been used.");
+		expect(
+			await db.agentRun.count({ where: { idempotencyKey: clientRequestId } }),
+		).toBe(1);
+	});
+
+	it("returns 404 when the record is missing", async () => {
+		let error: Error | null = null;
+		try {
+			await service.runOnRecord(
+				{
+					agentId,
+					clientRequestId: crypto.randomUUID(),
+					dealId: `missing-deal-${suffix}`,
+				},
+				userId,
+			);
+		} catch (caught) {
+			error = caught as Error;
+		}
+		expect(error?.message).toBe(`No deal with id missing-deal-${suffix}.`);
+	});
+
+	it("returns result.proposals from history", async () => {
+		const { id: runId } = await service.runOnRecord(
+			{ agentId, clientRequestId: crypto.randomUUID(), dealId },
+			userId,
+		);
+		const proposals = [
+			{
+				kind: "STAGE",
+				dealId,
+				stage: "CLOSED_LOST",
+				closedReason: "Budget cut",
+			},
+		];
+		await db.agentRun.update({
+			where: { id: runId },
+			data: {
+				status: "SUCCEEDED",
+				finishedAt: new Date(),
+				result: { proposals },
+			},
+		});
+
+		const history = await service.list(agentId, 50, userId);
+		const row = history.find((run) => run.id === runId);
+		expect(row?.result).toEqual({ proposals });
 	});
 });
