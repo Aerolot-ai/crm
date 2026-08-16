@@ -31,6 +31,9 @@ export const DISPATCH = {
 		proposalSubjectMax: 240,
 		proposalReasonMax: 2_000,
 		writeForbidden: "This run can only propose changes. It cannot write them.",
+		emptyProposalsCode: "NO_PROPOSALS",
+		emptyProposalsMessage:
+			"This run produced no CALL, STAGE, or TASK proposals.",
 	},
 
 	task: {

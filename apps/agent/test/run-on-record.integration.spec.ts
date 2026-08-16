@@ -285,19 +285,21 @@ describe("propose-only record runs", () => {
 		).toEqual({ stage: DealStage.DEMO_BOOKED, closedReason: null });
 	});
 
-	it("stores an empty proposal list for prose-only finishes", async () => {
+	it("fails a prose-only finish and stores an empty proposal list", async () => {
 		const run = await proposeRun();
-		await finishRun(run.id, {
+		const finished = await finishRun(run.id, {
 			summary: "No next step.",
 			result: { notes: "Just thinking out loud." },
 		});
+		expect(finished.status).toBe("FAILED");
 		expect(
 			await db.agentRun.findUniqueOrThrow({
 				where: { id: run.id },
-				select: { status: true, result: true },
+				select: { status: true, result: true, errorCode: true },
 			}),
 		).toEqual({
-			status: "SUCCEEDED",
+			status: "FAILED",
+			errorCode: "NO_PROPOSALS",
 			result: { proposals: [] },
 		});
 	});

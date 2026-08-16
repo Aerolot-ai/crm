@@ -804,6 +804,20 @@ export async function finishRun(
 		const result = proposeOnly
 			? await proposeOnlyResult(stored.input, input.result, input.proposals)
 			: (input.result ?? {});
+		if (
+			proposeOnly &&
+			"proposals" in result &&
+			Array.isArray(result.proposals) &&
+			result.proposals.length === 0
+		) {
+			return failLockedRun(
+				tx,
+				run,
+				DISPATCH.run.emptyProposalsCode,
+				DISPATCH.run.emptyProposalsMessage,
+				{ proposals: [] },
+			);
+		}
 		if (!proposeOnly) {
 			const noActionAccepted =
 				runReportedNoActionNeeded(input.result) &&
@@ -955,6 +969,7 @@ async function failLockedRun(
 	run: LockedAgentRun,
 	code: string,
 	message: string,
+	result?: Prisma.InputJsonValue,
 ) {
 	const sequence = run.nextEventSequence + 1;
 	const finishedAt = new Date();
@@ -964,6 +979,7 @@ async function failLockedRun(
 			status: "FAILED",
 			errorCode: code,
 			errorMessage: message,
+			...(result === undefined ? {} : { result }),
 			finishedAt,
 			nextEventSequence: sequence,
 		},
