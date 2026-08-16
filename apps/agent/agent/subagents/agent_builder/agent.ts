@@ -1,3 +1,4 @@
+import type {} from "@ai-sdk/provider";
 import { defineAgent, defineDynamic } from "eve";
 import { z } from "zod";
 import { selectedModel } from "../../lib/model";
